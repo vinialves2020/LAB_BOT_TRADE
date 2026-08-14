@@ -1,6 +1,6 @@
 # BOT_TRADE — RF × Transformer
 
-Laboratório reproduzível e bot de paper trading spot `long/flat` para `BTCUSDT`, `ETHUSDT` e `SOLUSDT`. O repositório implementa o protocolo experimental, o registro imutável de modelos e o caminho operacional 24/7; ainda não contém resultados acadêmicos, porque eles só podem existir depois dos experimentos e dos 183 dias oficiais.
+Laboratório reproduzível e bot de paper trading spot `long/flat` para `BTCUSDT`, `ETHUSDT` e `SOLUSDT`. O repositório implementa o protocolo experimental, o registro imutável de modelos e o caminho operacional 24/7. A primeira leva de treinamento foi encerrada como resultado negativo/inconclusivo e está documentada em [docs/RESULTS_FIRST_RUN.md](docs/RESULTS_FIRST_RUN.md); nenhum holdout, canário ou capital real foi ativado.
 
 > Segurança: não existe adaptador de ordens reais neste projeto. Aprovação nos gates apenas torna um ativo candidato a uma revisão futura e separada.
 
@@ -139,6 +139,7 @@ O dashboard fica em `http://localhost:8501`. O compose não agenda jobs automati
 - [Segurança e limites](docs/SECURITY.md)
 - [Deploy em Cloud Run](docs/CLOUD.md)
 - [Critérios de aceite](docs/ACCEPTANCE.md)
+- [Resultados da primeira leva e plano v2](docs/RESULTS_FIRST_RUN.md)
 
 ## Limitações explícitas
 
@@ -146,4 +147,4 @@ O dashboard fica em `http://localhost:8501`. O compose não agenda jobs automati
 - Fear & Greed é geral, centrado em Bitcoin e parcialmente derivado do mercado.
 - Fills paper não reproduzem prioridade de fila, latência ou impacto real integral.
 - Free tiers não têm SLA; orçamento é alerta, não hard cap, e custo zero não é garantido.
-- Nenhuma conclusão de desempenho é preenchida antes de dados reais de holdout e paper.
+- Nenhuma conclusão de promoção ou uso real é válida antes de holdout e paper; resultados preliminares negativos/inconclusivos ficam documentados separadamente.
