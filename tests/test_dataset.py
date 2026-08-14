@@ -9,12 +9,28 @@ from bottrade.dataset import DatasetBuilder
 from bottrade.domain import Asset, DataArm
 
 
-def test_dataset_build_refuses_market_gaps(app_config, market_frames, monkeypatch) -> None:
+def test_dataset_build_trims_all_assets_after_latest_gap(
+    app_config, market_frames, monkeypatch
+) -> None:
     builder = DatasetBuilder(app_config)
+    missing_open_time = market_frames["ETHUSDT"].loc[100, "open_time"]
     market_frames["ETHUSDT"] = market_frames["ETHUSDT"].drop(index=100).reset_index(drop=True)
     monkeypatch.setattr(builder.pipeline, "load_market", lambda: market_frames)
-    with pytest.raises(ValueError, match="dataset build aborted"):
-        builder.build([Asset.BTCUSDT])
+    monkeypatch.setattr(
+        builder.pipeline,
+        "load_alternatives",
+        lambda: ({asset.value: pd.DataFrame() for asset in Asset}, pd.DataFrame()),
+    )
+    bundles = builder.build([Asset.BTCUSDT])
+    assert bundles
+    assert all(bundle.frame["as_of"].min() > missing_open_time for bundle in bundles)
+    manifest = json.loads(
+        (app_config.project.data_dir / "manifests" / "features-latest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest["metadata"]["historical_gap_policy"] == "trim_after_latest_gap"
+    assert manifest["metadata"]["excluded_gap_count"] == 1
 
 
 def test_processed_dataset_keeps_content_addressed_holdout_copy(
@@ -44,11 +60,14 @@ def test_processed_dataset_keeps_content_addressed_holdout_copy(
     changed.to_parquet(latest, index=False)
     with pytest.raises(ValueError, match="checksum mismatch"):
         builder.load(Asset.BTCUSDT, DataArm.MARKET)
-    assert builder.load(
-        Asset.BTCUSDT,
-        DataArm.MARKET,
-        data_version=market.data_version,
-    ).data_version == market.data_version
+    assert (
+        builder.load(
+            Asset.BTCUSDT,
+            DataArm.MARKET,
+            data_version=market.data_version,
+        ).data_version
+        == market.data_version
+    )
     manifest = json.loads(
         (app_config.project.data_dir / "manifests" / "features-latest.json").read_text(
             encoding="utf-8"

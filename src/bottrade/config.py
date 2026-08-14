@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -37,6 +37,7 @@ class FeatureConfig(StrictModel):
     alternative_delay_hours: int = 24
     alternative_stale_hours: int = 72
     market_stale_minutes: int = 75
+    historical_gap_policy: Literal["trim_after_latest_gap"] = "trim_after_latest_gap"
     lag_hours: list[int] = Field(default_factory=lambda: [1, 3, 6, 12, 24, 72, 168])
     arms: list[str]
 

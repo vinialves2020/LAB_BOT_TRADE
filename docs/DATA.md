@@ -38,7 +38,7 @@ Fear & Greed de 0 a 100. É geral, diário, centrado em Bitcoin e parcialmente c
 - Cada linha inclui `event_time`, `available_at`, idade, `missing` e `stale`.
 - Idade superior a 72h obriga fallback market-only no runtime.
 - Mercado com mais de 75 minutos sem último candle fechado bloqueia o job signal.
-- Qualquer gap horário no histórico aborta `dataset build`; shifts nunca atravessam um buraco como se fosse uma hora válida.
+- O dataset bruto nunca é preenchido com preço sintético. Na construção histórica, os três mercados são cortados para o intervalo comum iniciado uma hora após a lacuna mais recente; a política, o corte e todas as lacunas excluídas entram no manifesto. Assim, shifts nunca atravessam um buraco como se fosse uma hora válida. No runtime, qualquer gap recente continua bloqueando novas entradas.
 - Infinitos viram missing; imputadores são ajustados apenas no treino.
 - Uma falha ao buscar fonte alternativa não contamina a construção market-only; o runtime usa o fallback previamente congelado. Não existe substituição automática de fonte que altere o schema.
 

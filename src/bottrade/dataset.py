@@ -37,17 +37,67 @@ class DatasetBuilder:
         self.output_dir = config.project.data_dir / "processed"
         self.manifest_dir = config.project.data_dir / "manifests"
 
+    def _continuous_market_history(
+        self, market: dict[str, pd.DataFrame]
+    ) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
+        if not market:
+            raise ValueError("market history is empty")
+        starts = {
+            symbol: pd.to_datetime(frame["open_time"], utc=True).min()
+            for symbol, frame in market.items()
+        }
+        ends = {
+            symbol: pd.to_datetime(frame["open_time"], utc=True).max()
+            for symbol, frame in market.items()
+        }
+        common_start = max(starts.values())
+        common_end = min(ends.values())
+        if common_start > common_end:
+            raise ValueError("market histories have no common time range")
+
+        gaps_by_symbol: dict[str, list[pd.Timestamp]] = {}
+        all_gaps: set[pd.Timestamp] = set()
+        for symbol, frame in market.items():
+            common = frame.loc[
+                (pd.to_datetime(frame["open_time"], utc=True) >= common_start)
+                & (pd.to_datetime(frame["open_time"], utc=True) <= common_end)
+            ]
+            gaps = validate_hourly_continuity(common)
+            gaps_by_symbol[symbol] = gaps
+            all_gaps.update(gaps)
+
+        continuous_start = max(all_gaps) + pd.Timedelta(hours=1) if all_gaps else common_start
+        trimmed: dict[str, pd.DataFrame] = {}
+        for symbol, frame in market.items():
+            times = pd.to_datetime(frame["open_time"], utc=True)
+            continuous = frame.loc[(times >= continuous_start) & (times <= common_end)].reset_index(
+                drop=True
+            )
+            remaining = validate_hourly_continuity(continuous)
+            if remaining:
+                preview = ", ".join(str(value) for value in remaining[:5])
+                raise ValueError(
+                    f"market history for {symbol} is not continuous after trimming ({preview})"
+                )
+            trimmed[symbol] = continuous
+
+        metadata = {
+            "historical_gap_policy": self.config.features.historical_gap_policy,
+            "common_market_start": common_start.isoformat(),
+            "common_market_end": common_end.isoformat(),
+            "continuous_market_start": continuous_start.isoformat(),
+            "excluded_gap_count": len(all_gaps),
+            "excluded_gaps": [value.isoformat() for value in sorted(all_gaps)],
+            "gaps_by_symbol": {
+                symbol: [value.isoformat() for value in values]
+                for symbol, values in gaps_by_symbol.items()
+            },
+        }
+        return trimmed, metadata
+
     def build(self, assets: list[Asset] | None = None) -> list[DatasetBundle]:
         selected_assets = assets or list(Asset)
-        market = self.pipeline.load_market()
-        for symbol, frame in market.items():
-            missing = validate_hourly_continuity(frame)
-            if missing:
-                preview = ", ".join(str(value) for value in missing[:5])
-                raise ValueError(
-                    f"market history for {symbol} has {len(missing)} gap(s); "
-                    f"dataset build aborted ({preview})"
-                )
+        market, history_metadata = self._continuous_market_history(self.pipeline.load_market())
         onchain, sentiment = self.pipeline.load_alternatives()
         raw_manifest_path = self.manifest_dir / "latest.json"
         raw_manifest = read_manifest(raw_manifest_path) if raw_manifest_path.exists() else {}
@@ -55,7 +105,10 @@ class DatasetBuilder:
         output_manifest = DatasetManifest(
             dataset="bottrade-feature-datasets",
             schema_version=FEATURE_SCHEMA_VERSION,
-            metadata={"raw_data_version": raw_manifest.get("data_version", "unknown")},
+            metadata={
+                "raw_data_version": raw_manifest.get("data_version", "unknown"),
+                **history_metadata,
+            },
         )
         for asset in selected_assets:
             for arm_name in self.config.features.arms:
@@ -77,7 +130,10 @@ class DatasetBuilder:
                     "asset": asset.value,
                     "arm": arm.value,
                     "feature_columns": list(featured.feature_columns),
-                    "dtypes": {column: str(featured.frame[column].dtype) for column in featured.frame},
+                    "dtypes": {
+                        column: str(featured.frame[column].dtype) for column in featured.frame
+                    },
+                    "market_history": history_metadata,
                 }
                 parquet_sha256 = sha256_file(path)
                 data_version = content_hash(
@@ -115,10 +171,7 @@ class DatasetBuilder:
                     rows=len(featured.frame),
                     min_event_time=featured.frame["as_of"].min().isoformat(),
                     max_event_time=featured.frame["as_of"].max().isoformat(),
-                    schema={
-                        column: str(dtype)
-                        for column, dtype in featured.frame.dtypes.items()
-                    },
+                    schema={column: str(dtype) for column, dtype in featured.frame.dtypes.items()},
                 )
                 bundles.append(
                     DatasetBundle(
@@ -159,7 +212,14 @@ class DatasetBuilder:
         stored_version = str(schema.get("data_version", ""))
         schema_core = {
             key: schema[key]
-            for key in ("schema_version", "asset", "arm", "feature_columns", "dtypes")
+            for key in (
+                "schema_version",
+                "asset",
+                "arm",
+                "feature_columns",
+                "dtypes",
+                "market_history",
+            )
         }
         expected_version = content_hash(
             [schema.get("raw_data_version", "unknown"), schema_core, actual_sha256]

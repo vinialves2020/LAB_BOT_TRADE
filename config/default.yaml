@@ -24,6 +24,7 @@ features:
   alternative_delay_hours: 24
   alternative_stale_hours: 72
   market_stale_minutes: 75
+  historical_gap_policy: trim_after_latest_gap
   lag_hours: [1, 3, 6, 12, 24, 72, 168]
   arms: [market, market_onchain, market_sentiment, market_all]
 
