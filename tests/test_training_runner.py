@@ -9,14 +9,19 @@ import pytest
 from bottrade.backtest import CalibrationEligibilityError
 from bottrade.dataset import DatasetBundle
 from bottrade.domain import Asset, DataArm, ModelFamily
-from bottrade.training import CandidateRejectedError, ExperimentRunner
+from bottrade.training import (
+    CandidateRejectedError,
+    ExperimentRunner,
+    HyperparameterSearchRejectedError,
+)
 
 
 def test_hyperparameter_search_rejects_an_all_failed_study(app_config, monkeypatch) -> None:
     runner = ExperimentRunner(app_config)
     monkeypatch.setattr(runner, "_score_params", lambda *args, **kwargs: -1_000_000.0)
     with pytest.raises(
-        ValueError, match="no hyperparameter trial produced an eligible calibration strategy"
+        HyperparameterSearchRejectedError,
+        match="no hyperparameter trial produced an eligible calibration strategy",
     ):
         runner.search(object(), ModelFamily.RANDOM_FOREST, [], trials=2)  # type: ignore[arg-type]
 

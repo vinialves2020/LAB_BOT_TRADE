@@ -51,6 +51,10 @@ class CandidateRejectedError(ValueError):
         self.rejection_path = rejection_path
 
 
+class HyperparameterSearchRejectedError(ValueError):
+    """Raised when every pre-registered search trial fails the calibration gates."""
+
+
 @dataclass(frozen=True, slots=True)
 class FoldEvaluation:
     fold: str
@@ -481,7 +485,9 @@ class ExperimentRunner:
         )
         study.optimize(objective, n_trials=min(trials, self.config.training.max_trials))
         if study.best_value <= -1_000_000.0:
-            raise ValueError("no hyperparameter trial produced an eligible calibration strategy")
+            raise HyperparameterSearchRejectedError(
+                "no hyperparameter trial produced an eligible calibration strategy"
+            )
         return {**defaults, **study.best_params}
 
     def _simple_benchmarks(

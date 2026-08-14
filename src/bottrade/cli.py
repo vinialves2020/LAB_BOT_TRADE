@@ -171,7 +171,11 @@ def _run_experiment(
 ) -> ExperimentResult:
     # Training dependencies (PyTorch, scikit-learn and explainers) are intentionally
     # absent from the small Cloud Run runtime image. Keep them behind training CLIs.
-    from bottrade.training import CandidateRejectedError, ExperimentRunner
+    from bottrade.training import (
+        CandidateRejectedError,
+        ExperimentRunner,
+        HyperparameterSearchRejectedError,
+    )
 
     bundle = DatasetBuilder(config).load(Asset(asset), DataArm(arm))
     try:
@@ -193,6 +197,19 @@ def _run_experiment(
                     "status": "rejected",
                     "reason": str(exc),
                     "record": str(exc.rejection_path),
+                },
+                indent=2,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=2) from exc
+    except HyperparameterSearchRejectedError as exc:
+        typer.echo(
+            json.dumps(
+                {
+                    "status": "rejected",
+                    "stage": "hyperparameter_search",
+                    "reason": str(exc),
                 },
                 indent=2,
             ),
