@@ -96,6 +96,34 @@ class SelectionManager:
                 records.append(record)
         return records
 
+    def _family_rejections(self, asset: Asset) -> dict[str, dict[str, Any]]:
+        root = self.config.project.artifact_dir / "experiments" / asset.value
+        records: dict[str, list[dict[str, Any]]] = {}
+        if not root.exists():
+            return {}
+        for path in root.rglob("rejections/*.json"):
+            record = json.loads(path.read_text(encoding="utf-8"))
+            source_control = record.get("source_control", {})
+            if not (
+                record.get("status") == "rejected"
+                and record.get("stage") == "hyperparameter_search"
+                and record.get("scope") == "family"
+                and record.get("phase") == "development"
+                and record.get("asset") == asset.value
+                and record.get("data_arm") == DataArm.MARKET.value
+                and bool(record.get("protocol_rejection_eligible"))
+                and source_control.get("commit") not in {None, "", "unavailable"}
+                and source_control.get("dirty") is False
+            ):
+                continue
+            record["rejection_path"] = str(path.resolve())
+            record["rejection_sha256"] = sha256_file(path)
+            records.setdefault(str(record["family"]), []).append(record)
+        return {
+            family: sorted(items, key=lambda item: str(item.get("created_at", "")))[-1]
+            for family, items in records.items()
+        }
+
     def _gate_reasons(self, record: dict[str, Any]) -> list[str]:
         metrics = record.get("selection_metrics", {})
         reasons: list[str] = []
@@ -127,18 +155,31 @@ class SelectionManager:
             for arm in self.config.features.arms
         ]
         records = self._records(asset)
+        family_rejections = self._family_rejections(asset)
         by_key: dict[str, list[dict[str, Any]]] = {}
         for record in records:
             key = f"{record['family']}:{record['arm']}"
             by_key.setdefault(key, []).append(record)
-        missing = [key for key in required if key not in by_key]
+        rejected_families = {
+            family.value
+            for family in (ModelFamily.RANDOM_FOREST, ModelFamily.TRANSFORMER)
+            if f"{family.value}:{DataArm.MARKET.value}" not in by_key
+            and family.value in family_rejections
+        }
+        missing = [
+            key
+            for key in required
+            if key not in by_key and key.split(":", maxsplit=1)[0] not in rejected_families
+        ]
         if missing:
             raise ValueError(
-                "cannot freeze selection before all eight protocol candidates exist: "
+                "cannot freeze selection before all eight protocol outcomes exist: "
                 + ", ".join(missing)
             )
         selected_records: dict[str, dict[str, Any]] = {}
         for family in (ModelFamily.RANDOM_FOREST, ModelFamily.TRANSFORMER):
+            if family.value in rejected_families:
+                continue
             market_key = f"{family.value}:{DataArm.MARKET.value}"
             market_record = sorted(
                 by_key[market_key],
@@ -166,11 +207,26 @@ class SelectionManager:
         candidates: list[dict[str, Any]] = []
         eligible: list[dict[str, Any]] = []
         for key in required:
+            family_name = key.split(":", maxsplit=1)[0]
+            if family_name in rejected_families:
+                rejection = family_rejections[family_name]
+                candidates.append(
+                    {
+                        "key": key,
+                        "status": "rejected",
+                        "rejection_id": rejection["rejection_id"],
+                        "gate_reasons": ["market_hyperparameter_search_rejected"],
+                        "rejection_path": rejection["rejection_path"],
+                        "rejection_sha256": rejection["rejection_sha256"],
+                    }
+                )
+                continue
             # Use the latest candidate tied to the same family-specific market search.
             record = selected_records[key]
             reasons = self._gate_reasons(record)
             summary = {
                 "key": key,
+                "status": "eligible" if not reasons else "ineligible",
                 "run_id": record["run_id"],
                 "version": record["version"],
                 "selection_metrics": record["selection_metrics"],

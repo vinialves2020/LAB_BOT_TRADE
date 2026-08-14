@@ -26,6 +26,28 @@ def test_hyperparameter_search_rejects_an_all_failed_study(app_config, monkeypat
         runner.search(object(), ModelFamily.RANDOM_FOREST, [], trials=2)  # type: ignore[arg-type]
 
 
+def test_official_market_search_rejection_is_protocol_eligible(app_config, tmp_path) -> None:
+    dataset = DatasetBundle(
+        asset=Asset.ETHUSDT,
+        arm=DataArm.MARKET,
+        frame=pd.DataFrame(),
+        feature_columns=("feature",),
+        data_version="c" * 20,
+        schema_version="features-v3",
+        path=tmp_path / "unused.parquet",
+    )
+    path = ExperimentRunner(app_config)._record_search_rejection(
+        dataset=dataset,
+        family=ModelFamily.RANDOM_FOREST,
+        trials=app_config.training.max_trials,
+        max_search_folds=None,
+        source_control={"commit": "a" * 40, "dirty": False},
+    )
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record["protocol_rejection_eligible"] is True
+    assert record["covers_arms"] == [arm.value for arm in DataArm]
+
+
 def test_final_seed_rejection_is_recorded(app_config, monkeypatch, tmp_path) -> None:
     times = pd.date_range("2024-01-01", "2024-04-30", freq="1h", tz="UTC")
     frame = pd.DataFrame(

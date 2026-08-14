@@ -204,15 +204,15 @@ def _run_experiment(
         )
         raise typer.Exit(code=2) from exc
     except HyperparameterSearchRejectedError as exc:
+        payload = {
+            "status": "rejected",
+            "stage": "hyperparameter_search",
+            "reason": str(exc),
+        }
+        if exc.rejection_path is not None:
+            payload["record"] = str(exc.rejection_path)
         typer.echo(
-            json.dumps(
-                {
-                    "status": "rejected",
-                    "stage": "hyperparameter_search",
-                    "reason": str(exc),
-                },
-                indent=2,
-            ),
+            json.dumps(payload, indent=2),
             err=True,
         )
         raise typer.Exit(code=2) from exc

@@ -54,6 +54,10 @@ class CandidateRejectedError(ValueError):
 class HyperparameterSearchRejectedError(ValueError):
     """Raised when every pre-registered search trial fails the calibration gates."""
 
+    def __init__(self, message: str, rejection_path: Path | None = None) -> None:
+        super().__init__(message)
+        self.rejection_path = rejection_path
+
 
 @dataclass(frozen=True, slots=True)
 class FoldEvaluation:
@@ -267,6 +271,70 @@ class ExperimentRunner:
             "failed_fold": fold.name,
             "reason": reason,
             "source_control": source_control,
+        }
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        temporary.replace(path)
+        return path
+
+    def _record_search_rejection(
+        self,
+        *,
+        dataset: DatasetBundle,
+        family: ModelFamily,
+        trials: int,
+        max_search_folds: int | None,
+        source_control: dict[str, str | bool],
+    ) -> Path:
+        created_at = utc_now()
+        rejection_id = deterministic_id(
+            "search-rejected",
+            dataset.asset.value,
+            family.value,
+            dataset.data_version,
+            trials,
+            max_search_folds,
+            created_at.isoformat(),
+            length=16,
+        )
+        directory = (
+            self.config.project.artifact_dir
+            / "experiments"
+            / dataset.asset.value
+            / DataArm.MARKET.value
+            / family.value
+            / "rejections"
+        )
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{rejection_id}.json"
+        clean_source = (
+            source_control.get("commit") not in {"", "unavailable"}
+            and source_control.get("dirty") is False
+        )
+        payload = {
+            "status": "rejected",
+            "stage": "hyperparameter_search",
+            "scope": "family",
+            "covers_arms": [arm.value for arm in DataArm],
+            "rejection_id": rejection_id,
+            "created_at": created_at.isoformat(),
+            "phase": "development",
+            "asset": dataset.asset.value,
+            "family": family.value,
+            "data_arm": dataset.arm.value,
+            "data_version": dataset.data_version,
+            "feature_schema_version": dataset.schema_version,
+            "trials_requested": trials,
+            "trials_completed": min(trials, self.config.training.max_trials),
+            "max_search_folds": max_search_folds,
+            "reason": "no hyperparameter trial produced an eligible calibration strategy",
+            "source_control": source_control,
+            "protocol_rejection_eligible": bool(
+                dataset.arm == DataArm.MARKET
+                and trials >= self.config.training.max_trials
+                and max_search_folds is None
+                and clean_source
+            ),
         }
         temporary = path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -726,6 +794,7 @@ class ExperimentRunner:
         evaluation_seeds = seeds or self.config.training.seeds
         requested_trials = trials or self.config.training.max_trials
         folds = self._folds(dataset.frame, phase=phase, max_folds=max_search_folds)
+        source_control = _source_control()
         selected_record: dict[str, Any] = {}
         if phase == "holdout":
             selected_record = self._verify_selection(
@@ -733,14 +802,23 @@ class ExperimentRunner:
             )
             params = dict(selected_record["parameters"])
         else:
-            params = self._development_params(
-                dataset,
-                family,
-                folds,
-                trials=requested_trials,
-                params_override=params_override,
-            )
-        source_control = _source_control()
+            try:
+                params = self._development_params(
+                    dataset,
+                    family,
+                    folds,
+                    trials=requested_trials,
+                    params_override=params_override,
+                )
+            except HyperparameterSearchRejectedError as exc:
+                rejection_path = self._record_search_rejection(
+                    dataset=dataset,
+                    family=family,
+                    trials=requested_trials,
+                    max_search_folds=max_search_folds,
+                    source_control=source_control,
+                )
+                raise HyperparameterSearchRejectedError(str(exc), rejection_path) from exc
         clean_source = (
             source_control.get("commit") not in {"", "unavailable"}
             and source_control.get("dirty") is False

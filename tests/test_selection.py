@@ -57,6 +57,30 @@ def _record(
     )
 
 
+def _search_rejection(root: Path, *, asset: Asset, family: ModelFamily) -> None:
+    path = root / asset.value / DataArm.MARKET.value / family.value / "rejections" / "r.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "status": "rejected",
+                "stage": "hyperparameter_search",
+                "scope": "family",
+                "rejection_id": f"{family.value}-rejected",
+                "created_at": "2025-07-31T00:00:00Z",
+                "phase": "development",
+                "asset": asset.value,
+                "family": family.value,
+                "data_arm": DataArm.MARKET.value,
+                "protocol_rejection_eligible": True,
+                "source_control": {"commit": "a" * 40, "dirty": False},
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_selection_freezes_roles_before_holdout(app_config) -> None:
     scores = iter(range(1, 9))
     for family in (ModelFamily.RANDOM_FOREST, ModelFamily.TRANSFORMER):
@@ -96,3 +120,34 @@ def test_selection_refuses_incomplete_candidate_matrix(app_config) -> None:
     )
     with pytest.raises(ValueError, match="all eight"):
         SelectionManager(app_config).select(Asset.ETHUSDT)
+
+
+def test_selection_accepts_a_formally_rejected_family(app_config) -> None:
+    root = app_config.project.artifact_dir / "experiments"
+    _search_rejection(root, asset=Asset.ETHUSDT, family=ModelFamily.RANDOM_FOREST)
+    for arm in DataArm:
+        _record(
+            root,
+            asset=Asset.ETHUSDT,
+            family=ModelFamily.TRANSFORMER,
+            arm=arm,
+            score=float(list(DataArm).index(arm) + 1),
+        )
+    lock = SelectionManager(app_config).select(Asset.ETHUSDT)
+    assert lock.status == "selected"
+    assert lock.family == ModelFamily.TRANSFORMER
+    rejected = [item for item in lock.candidates if item["status"] == "rejected"]
+    assert len(rejected) == 4
+    assert {item["key"].split(":")[0] for item in rejected} == {
+        ModelFamily.RANDOM_FOREST.value
+    }
+
+
+def test_selection_goes_to_cash_when_both_families_are_formally_rejected(app_config) -> None:
+    root = app_config.project.artifact_dir / "experiments"
+    for family in (ModelFamily.RANDOM_FOREST, ModelFamily.TRANSFORMER):
+        _search_rejection(root, asset=Asset.SOLUSDT, family=family)
+    lock = SelectionManager(app_config).select(Asset.SOLUSDT)
+    assert lock.status == "cash"
+    assert lock.chosen_run_id == ""
+    assert all(item["status"] == "rejected" for item in lock.candidates)
