@@ -98,9 +98,7 @@ def _aggregate_backtests(
         timestamps=timelines["as_of"],
         positions=timelines["position"],
         turnover=float(sum(result.metrics.turnover for result in results)),
-        transaction_cost=float(
-            sum(result.metrics.transaction_cost for result in results)
-        ),
+        transaction_cost=float(sum(result.metrics.transaction_cost for result in results)),
         trade_returns=trade_returns,
         annualization_days=annualization_days,
     )
@@ -139,13 +137,16 @@ def _dependency_versions() -> dict[str, str]:
 def _source_control() -> dict[str, str | bool]:
     environment_commit = os.getenv("GITHUB_SHA", "").strip()
     try:
-        commit = environment_commit or subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        ).stdout.strip()
+        commit = (
+            environment_commit
+            or subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout.strip()
+        )
         status = subprocess.run(
             ["git", "status", "--porcelain"],
             check=True,
@@ -233,14 +234,10 @@ class ExperimentRunner:
                 params=params,
                 seed=seed,
                 calendar_hour_index=(
-                    names.index("calendar_hour_index")
-                    if "calendar_hour_index" in names
-                    else None
+                    names.index("calendar_hour_index") if "calendar_hour_index" in names else None
                 ),
                 calendar_day_index=(
-                    names.index("calendar_day_index")
-                    if "calendar_day_index" in names
-                    else None
+                    names.index("calendar_day_index") if "calendar_day_index" in names else None
                 ),
             )
         raise ValueError(f"unsupported family: {family}")
@@ -294,9 +291,9 @@ class ExperimentRunner:
         calibration_raw = calibration * dataset.frame.iloc[fold.calibration_indices][
             "target_volatility"
         ].to_numpy(dtype=float)
-        test_raw = test * dataset.frame.iloc[fold.test_indices][
-            "target_volatility"
-        ].to_numpy(dtype=float)
+        test_raw = test * dataset.frame.iloc[fold.test_indices]["target_volatility"].to_numpy(
+            dtype=float
+        )
         threshold, _ = select_entry_threshold(
             dataset.frame.iloc[fold.calibration_indices].reset_index(drop=True),
             calibration_raw,
@@ -406,22 +403,18 @@ class ExperimentRunner:
                         "dim_feedforward", [64, 128, 192, 256]
                     ),
                     "dropout": trial.suggest_float("dropout", 0.05, 0.25),
-                    "learning_rate": trial.suggest_float(
-                        "learning_rate", 1e-4, 1e-3, log=True
-                    ),
-                    "weight_decay": trial.suggest_float(
-                        "weight_decay", 1e-6, 1e-3, log=True
-                    ),
+                    "learning_rate": trial.suggest_float("learning_rate", 1e-4, 1e-3, log=True),
+                    "weight_decay": trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True),
                 }
-            return self._score_params(
-                dataset, family, params, folds, self.config.training.seeds[0]
-            )
+            return self._score_params(dataset, family, params, folds, self.config.training.seeds[0])
 
         study = optuna.create_study(
             direction="maximize",
             sampler=optuna.samplers.TPESampler(seed=self.config.training.seeds[0]),
         )
         study.optimize(objective, n_trials=min(trials, self.config.training.max_trials))
+        if study.best_value <= -1_000_000.0:
+            raise ValueError("no hyperparameter trial produced an eligible calibration strategy")
         return {**defaults, **study.best_params}
 
     def _simple_benchmarks(
@@ -621,14 +614,20 @@ class ExperimentRunner:
         selected = selection_lock.roles.get(selection_role, {})
         if not selected:
             raise ValueError(f"selection lock has no frozen role: {selection_role}")
-        if ModelFamily(selected["family"]) != family or DataArm(selected["data_arm"]) != dataset.arm:
+        if (
+            ModelFamily(selected["family"]) != family
+            or DataArm(selected["data_arm"]) != dataset.arm
+        ):
             raise ValueError("family/data arm differs from the frozen selection")
         if selected["data_version"] != dataset.data_version:
             raise ValueError("dataset version differs from the frozen selection")
         if selected["feature_schema_version"] != dataset.schema_version:
             raise ValueError("feature schema differs from the frozen selection")
         selected_path = Path(selected["experiment_path"])
-        if not selected_path.exists() or sha256_file(selected_path) != selected["experiment_sha256"]:
+        if (
+            not selected_path.exists()
+            or sha256_file(selected_path) != selected["experiment_sha256"]
+        ):
             raise ValueError("selected experiment checksum mismatch")
         record = json.loads(selected_path.read_text(encoding="utf-8"))
         if record["parameters"] != selected["parameters"]:
@@ -722,9 +721,7 @@ class ExperimentRunner:
         evaluated = [item for items in evaluated_by_seed.values() for item in items]
         predictive = _aggregate_predictive(evaluated)
         regimes = aggregate_regime_analyses([item.regimes for item in evaluated])
-        benchmark_metrics = self._benchmarks(
-            dataset, folds, float(aggregate["daily_volatility"])
-        )
+        benchmark_metrics = self._benchmarks(dataset, folds, float(aggregate["daily_volatility"]))
         fold_evaluations: list[FoldEvaluation] = []
         for fold_index, fold in enumerate(folds):
             items = [evaluated_by_seed[seed][fold_index] for seed in evaluation_seeds]
@@ -733,13 +730,9 @@ class ExperimentRunner:
                     fold=fold.name,
                     threshold_return=float(median(item.threshold for item in items)),
                     metrics=_median_performance([item.normal.metrics for item in items]),
-                    stress_metrics=_median_performance(
-                        [item.stress.metrics for item in items]
-                    ),
+                    stress_metrics=_median_performance([item.stress.metrics for item in items]),
                     predictive_metrics=_aggregate_predictive(items).to_dict(),
-                    regime_metrics=aggregate_regime_analyses(
-                        [item.regimes for item in items]
-                    ),
+                    regime_metrics=aggregate_regime_analyses([item.regimes for item in items]),
                     seed_metrics={
                         str(seed): evaluated_by_seed[seed][fold_index].normal.metrics.to_dict()
                         for seed in evaluation_seeds
@@ -754,12 +747,8 @@ class ExperimentRunner:
 
         full_protocol_seeds = evaluation_seeds == self.config.training.seeds
         if phase == "development":
-            market_search_complete = (
-                dataset.arm != DataArm.MARKET
-                or (
-                    params_override is None
-                    and requested_trials >= self.config.training.max_trials
-                )
+            market_search_complete = dataset.arm != DataArm.MARKET or (
+                params_override is None and requested_trials >= self.config.training.max_trials
             )
             protocol_eligible = (
                 full_protocol_seeds
@@ -781,9 +770,7 @@ class ExperimentRunner:
                 and clean_source
             )
             selection_metrics = dict(selected_record.get("selection_metrics", {}))
-            selection_stress_metrics = dict(
-                selected_record.get("selection_stress_metrics", {})
-            )
+            selection_stress_metrics = dict(selected_record.get("selection_stress_metrics", {}))
             holdout_metrics = aggregate
             holdout_stress_metrics = aggregate_stress
             selection_id = selection_lock.selection_id if selection_lock else ""
@@ -910,9 +897,7 @@ class ExperimentRunner:
             training_end=pd.Timestamp(fit_end).to_pydatetime(),
             horizon_hours=self.config.features.horizon_hours,
             sequence_length=(
-                self.config.features.lookback_hours
-                if family == ModelFamily.TRANSFORMER
-                else 1
+                self.config.features.lookback_hours if family == ModelFamily.TRANSFORMER else 1
             ),
             feature_names=list(dataset.feature_columns),
             feature_schema_version=dataset.schema_version,
@@ -1094,11 +1079,7 @@ class ExperimentRunner:
             f"{created_at.strftime('%Y%m%dT%H%M%SZ')}-{dataset.data_version[:8]}-{run_id[:6]}"
         )
         run_directory = (
-            self.config.project.artifact_dir
-            / "refits"
-            / dataset.asset.value
-            / slot
-            / run_id
+            self.config.project.artifact_dir / "refits" / dataset.asset.value / slot / run_id
         )
         bundle_directory = run_directory / "bundle"
         bundle_directory.mkdir(parents=True, exist_ok=True)

@@ -17,6 +17,7 @@ data/manifests/
 artifacts/experiments/
 artifacts/refits/
 artifacts/registry/
+artifacts/logs/
 reports/generated/
 *.db
 *.sqlite
