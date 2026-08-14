@@ -1,0 +1,6 @@
+project_id              = "your-gcp-project"
+region                  = "us-central1"
+image                   = "us-central1-docker.pkg.dev/your-gcp-project/bottrade/runtime:immutable-tag"
+dashboard_invoker_email = "user:you@example.com"
+billing_account_id      = "000000-000000-000000"
+schedulers_paused       = true

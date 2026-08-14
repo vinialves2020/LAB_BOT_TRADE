@@ -1,0 +1,77 @@
+from __future__ import annotations
+
+import json
+
+import numpy as np
+import pandas as pd
+
+from bottrade.dataset import DatasetBundle
+from bottrade.domain import Asset, DataArm, ModelFamily
+from bottrade.training import ExperimentRunner
+
+
+def test_random_forest_experiment_runner_writes_reproducible_bundle(
+    app_config, tmp_path
+) -> None:
+    app_config.training.train_months = 1
+    app_config.training.calibration_months = 1
+    app_config.training.test_months = 1
+    app_config.training.holdout_start = "2024-06-01T00:00:00Z"
+    app_config.training.holdout_end = "2024-06-30T23:59:59Z"
+    app_config.training.explainability_samples = 16
+    app_config.training.permutation_repeats = 1
+    times = pd.date_range("2024-01-01", "2024-07-31", freq="1h", tz="UTC")
+    regime = np.where((np.arange(len(times)) // 24) % 2 == 0, 1.0, -1.0)
+    hourly_return = 0.002 * regime
+    close = 100.0 * np.cumprod(1.0 + hourly_return)
+    frame = pd.DataFrame(
+        {
+            "as_of": times,
+            "feature_regime": regime,
+            "feature_slow": pd.Series(regime).rolling(6, min_periods=1).mean().to_numpy(),
+            "target_normalized_return": regime,
+            "target_volatility": 0.01,
+            "next_hour_return": hourly_return,
+            "reference_close": close,
+        }
+    )
+    dataset = DatasetBundle(
+        asset=Asset.BTCUSDT,
+        arm=DataArm.MARKET,
+        frame=frame,
+        feature_columns=("feature_regime", "feature_slow"),
+        data_version="a" * 20,
+        schema_version="features-v2",
+        path=tmp_path / "synthetic.parquet",
+    )
+    result = ExperimentRunner(app_config).run(
+        dataset,
+        ModelFamily.RANDOM_FOREST,
+        trials=1,
+        max_search_folds=1,
+        seeds=[11],
+        params_override={
+            "n_estimators": 10,
+            "max_depth": 4,
+            "min_samples_leaf": 2,
+            "max_features": 1.0,
+            "n_jobs": 1,
+        },
+    )
+    metadata = json.loads((result.registry_path / "metadata.json").read_text("utf-8"))
+    experiment = json.loads(
+        (
+            app_config.project.artifact_dir
+            / "experiments"
+            / Asset.BTCUSDT.value
+            / DataArm.MARKET.value
+            / ModelFamily.RANDOM_FOREST.value
+            / result.run_id
+            / "experiment.json"
+        ).read_text("utf-8")
+    )
+    assert (result.registry_path / "model.onnx").exists()
+    assert metadata["onnx_verified"] is True
+    assert metadata["protocol_eligible"] is False
+    assert experiment["source_control"]["commit"]
+    assert experiment["seed_metrics"].keys() == {"11"}

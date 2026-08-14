@@ -1,0 +1,83 @@
+project:
+  name: bottrade-research
+  timezone: UTC
+  data_dir: /tmp/bottrade/data
+  artifact_dir: /tmp/bottrade/artifacts
+  report_dir: /tmp/bottrade/reports
+
+market:
+  symbols:
+    BTCUSDT: "2017-08-17"
+    ETHUSDT: "2017-08-17"
+    SOLUSDT: "2020-08-11"
+  interval: 1h
+  quote_asset: USDT
+  archive_base_url: https://data.binance.vision
+  rest_base_url: https://data-api.binance.vision
+  api_base_url: https://api.binance.com
+  request_timeout_seconds: 30
+  max_retries: 4
+
+features:
+  horizon_hours: 3
+  lookback_hours: 168
+  alternative_delay_hours: 24
+  alternative_stale_hours: 72
+  market_stale_minutes: 75
+  lag_hours: [1, 3, 6, 12, 24, 72, 168]
+  arms: [market, market_onchain, market_sentiment, market_all]
+
+training:
+  holdout_start: "2025-08-01T00:00:00Z"
+  holdout_end: "2026-07-31T23:59:59Z"
+  train_months: 24
+  calibration_months: 3
+  test_months: 1
+  purge_hours: 3
+  max_trials: 30
+  seeds: [11, 23, 37, 53, 71]
+  transformer: {}
+  random_forest: {}
+
+backtest:
+  fee_bps_per_leg: 10.0
+  friction_bps_per_leg: 2.0
+  stress_multiplier: 2.0
+  threshold_margin_bps: [0, 5, 10, 20, 30]
+  max_holding_hours: 12
+  minimum_calibration_trades: 20
+  maximum_calibration_turnover_per_day: 2.0
+  annualization_days: 365
+
+paper:
+  ledgers:
+    - {name: paper_500, initial_cash: 500.0}
+    - {name: paper_1000, initial_cash: 1000.0}
+  max_asset_weight: 0.20
+  max_gross_weight: 0.50
+  rebalance_band: 0.02
+  daily_loss_limit: 0.01
+  position_loss_limit: 0.005
+  drawdown_circuit_breaker: 0.08
+  max_holding_hours: 12
+  quote_depth_levels: 20
+  canary_days: 14
+  official_paper_days: 183
+
+runtime:
+  database_url: ""
+  log_level: INFO
+  model_bucket: ""
+  model_prefix: registry
+  telegram_bot_token: ""
+  telegram_chat_id: ""
+  dashboard_password: ""
+  clock_tolerance_seconds: 15
+
+gates:
+  min_sharpe: 1.0
+  max_drawdown: 0.08
+  min_profit_factor: 1.2
+  min_closed_trades: 100
+  require_positive_stress_return: true
+  incident_free_days: 90

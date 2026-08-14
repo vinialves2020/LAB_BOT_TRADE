@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: bottrade
+      POSTGRES_USER: bottrade
+      POSTGRES_PASSWORD: local-paper-only
+    ports:
+      - "5432:5432"
+    volumes:
+      - bottrade-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bottrade"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  dashboard:
+    build: .
+    entrypoint: ["streamlit"]
+    command: ["run", "/app/dashboard/app.py", "--server.address=0.0.0.0"]
+    environment:
+      BOTTRADE_CONFIG: /app/config/cloud.yaml
+      BOTTRADE_DATABASE_URL: postgresql+psycopg://bottrade:local-paper-only@postgres:5432/bottrade
+      BOTTRADE_DASHBOARD_PASSWORD: local-paper
+    ports:
+      - "8501:8501"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  paper-job:
+    build: .
+    profiles: ["manual-job"]
+    environment:
+      BOTTRADE_CONFIG: /app/config/cloud.yaml
+      BOTTRADE_DATABASE_URL: postgresql+psycopg://bottrade:local-paper-only@postgres:5432/bottrade
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  bottrade-postgres:
