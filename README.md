@@ -44,6 +44,13 @@ Python 3.11 a 3.13:
     bottrade paper init
     bottrade doctor
 
+No Windows com GPU NVIDIA, o índice padrão pode instalar uma build CPU-only do
+PyTorch. Confirme com `python -c "import torch; print(torch.cuda.is_available())"`.
+Para a RTX 2060 usada neste estudo, preserve a versão e troque a wheel pela build
+CUDA 12.8 oficial antes de treinar Transformers:
+
+    python -m pip install --no-deps --force-reinstall torch==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+
 Antes de modelos promovidos, `doctor` pode retornar `model_not_ready`; essa falha segura é esperada.
 
 Antes da primeira execução oficial, inicialize o controle de versão e faça um commit do protocolo/configuração. Cada experimento captura `HEAD` e o estado dirty; sem repositório ele registra `commit=unavailable` e não deve ser aceito como execução acadêmica final.
