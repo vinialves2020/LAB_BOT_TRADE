@@ -254,6 +254,11 @@ def write_model_card(metadata: dict[str, Any], output: Path) -> Path:
     predictive = metadata.get("predictive_metrics", {})
     operational = metadata.get("operational_metrics", {})
     source_control = metadata.get("source_control", {})
+    metric_heading = (
+        "Holdout congelado"
+        if metadata.get("protocol_phase") == "holdout"
+        else "Teste walk-forward pré-holdout"
+    )
     lines = [
         f"# Model card — {metadata.get('asset')} / {metadata.get('family')}",
         "",
@@ -269,7 +274,7 @@ def write_model_card(metadata: dict[str, Any], output: Path) -> Path:
         f"- Erro máximo ONNX: {float(metadata.get('onnx_max_abs_error', 0)):.8f}",
         f"- Explicabilidade completa: {metadata.get('explainability_complete')}",
         "",
-        "## Holdout",
+        f"## {metric_heading}",
         "",
         f"- Retorno líquido: {_format_percent(float(metrics.get('total_return', 0)))}",
         f"- Sharpe: {float(metrics.get('sharpe', 0)):.3f}",
