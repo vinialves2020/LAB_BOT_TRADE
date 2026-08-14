@@ -17,7 +17,12 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
-from bottrade.backtest import BacktestResult, select_entry_threshold, simulate_long_flat
+from bottrade.backtest import (
+    BacktestResult,
+    CalibrationEligibilityError,
+    select_entry_threshold,
+    simulate_long_flat,
+)
 from bottrade.config import AppConfig
 from bottrade.dataset import DatasetBundle
 from bottrade.domain import DataArm, ModelFamily, RunStage
@@ -38,6 +43,12 @@ from bottrade.validation import WalkForwardFold, walk_forward_folds
 
 LOGGER = logging.getLogger(__name__)
 ExperimentPhase = Literal["development", "holdout"]
+
+
+class CandidateRejectedError(ValueError):
+    def __init__(self, message: str, rejection_path: Path) -> None:
+        super().__init__(message)
+        self.rejection_path = rejection_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +212,62 @@ class ExperimentRunner:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self.registry = ModelRegistry(config)
+
+    def _record_seed_rejection(
+        self,
+        *,
+        dataset: DatasetBundle,
+        family: ModelFamily,
+        phase: ExperimentPhase,
+        params: dict[str, Any],
+        seed: int,
+        fold: WalkForwardFold,
+        reason: str,
+        source_control: dict[str, str | bool],
+    ) -> Path:
+        created_at = utc_now()
+        rejection_id = deterministic_id(
+            "rejected",
+            dataset.asset.value,
+            family.value,
+            dataset.arm.value,
+            dataset.data_version,
+            params,
+            seed,
+            fold.name,
+            created_at.isoformat(),
+            length=16,
+        )
+        directory = (
+            self.config.project.artifact_dir
+            / "experiments"
+            / dataset.asset.value
+            / dataset.arm.value
+            / family.value
+            / "rejections"
+        )
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{rejection_id}.json"
+        payload = {
+            "status": "rejected",
+            "rejection_id": rejection_id,
+            "created_at": created_at.isoformat(),
+            "phase": phase,
+            "asset": dataset.asset.value,
+            "family": family.value,
+            "data_arm": dataset.arm.value,
+            "data_version": dataset.data_version,
+            "feature_schema_version": dataset.schema_version,
+            "parameters": params,
+            "failed_seed": seed,
+            "failed_fold": fold.name,
+            "reason": reason,
+            "source_control": source_control,
+        }
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        temporary.replace(path)
+        return path
 
     def _default_params(self, family: ModelFamily) -> dict[str, Any]:
         if family == ModelFamily.RANDOM_FOREST:
@@ -673,19 +740,35 @@ class ExperimentRunner:
             and source_control.get("dirty") is False
         )
 
-        evaluated_by_seed = {
-            seed: [
-                self._evaluate_fold(
-                    dataset=dataset,
-                    family=family,
-                    params=params,
-                    fold=fold,
-                    seeds=[seed],
-                )
-                for fold in folds
-            ]
-            for seed in evaluation_seeds
-        }
+        evaluated_by_seed: dict[int, list[EvaluatedFold]] = {}
+        for seed in evaluation_seeds:
+            evaluated_by_seed[seed] = []
+            for fold in folds:
+                try:
+                    evaluated_by_seed[seed].append(
+                        self._evaluate_fold(
+                            dataset=dataset,
+                            family=family,
+                            params=params,
+                            fold=fold,
+                            seeds=[seed],
+                        )
+                    )
+                except CalibrationEligibilityError as exc:
+                    rejection_path = self._record_seed_rejection(
+                        dataset=dataset,
+                        family=family,
+                        phase=phase,
+                        params=params,
+                        seed=seed,
+                        fold=fold,
+                        reason=str(exc),
+                        source_control=source_control,
+                    )
+                    raise CandidateRejectedError(
+                        f"candidate rejected at seed={seed}, fold={fold.name}: {exc}",
+                        rejection_path,
+                    ) from exc
         seed_metrics = {
             str(seed): _aggregate_backtests(
                 [item.normal for item in items],

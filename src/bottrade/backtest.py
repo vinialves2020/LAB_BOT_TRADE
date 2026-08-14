@@ -9,6 +9,10 @@ from bottrade.config import BacktestConfig
 from bottrade.metrics import PerformanceMetrics, calculate_performance, compound_returns
 
 
+class CalibrationEligibilityError(ValueError):
+    """No pre-registered threshold passed the calibration activity gates."""
+
+
 @dataclass(frozen=True, slots=True)
 class BacktestResult:
     timeline: pd.DataFrame
@@ -65,10 +69,7 @@ def simulate_long_flat(
             daily_blocked = False
         drawdown = 1.0 - equity_value / peak_equity if peak_equity > 0 else 1.0
         daily_return = equity_value / day_start_equity - 1.0 if day_start_equity > 0 else -1.0
-        if (
-            drawdown_circuit_breaker is not None
-            and drawdown >= drawdown_circuit_breaker
-        ):
+        if drawdown_circuit_breaker is not None and drawdown >= drawdown_circuit_breaker:
             circuit_breaker = True
         if daily_loss_limit is not None and daily_return <= -daily_loss_limit:
             daily_blocked = True
@@ -98,9 +99,7 @@ def simulate_long_flat(
             desired = position_size
             reason = "entry_signal"
         elif position > 0.0 and (
-            not np.isfinite(row.prediction)
-            or row.prediction <= 0.0
-            or held >= max_holding_hours
+            not np.isfinite(row.prediction) or row.prediction <= 0.0 or held >= max_holding_hours
         ):
             desired = 0.0
             reason = (
@@ -229,7 +228,7 @@ def select_entry_threshold(
         <= config.maximum_calibration_turnover_per_day
     ]
     if not eligible:
-        raise ValueError(
+        raise CalibrationEligibilityError(
             "no entry threshold satisfies calibration trade-count and turnover constraints"
         )
     return max(

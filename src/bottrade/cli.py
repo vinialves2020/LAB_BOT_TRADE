@@ -78,9 +78,7 @@ def _active_slots_or_cash(
     for role in ("champion", "market_fallback"):
         version = lock.holdout_versions.get(role)
         if not version:
-            raise typer.BadParameter(
-                f"{asset.value} ainda não concluiu o holdout de {role}"
-            )
+            raise typer.BadParameter(f"{asset.value} ainda não concluiu o holdout de {role}")
         try:
             _, holdout_metadata = registry.load_version(asset, version)
         except FileNotFoundError as exc:
@@ -128,7 +126,9 @@ def _active_slots_or_cash(
 @data_app.command("sync")
 def data_sync(
     config_path: ConfigOption = None,
-    start: Annotated[str | None, typer.Option(help="ISO-8601 UTC; padrão início mais antigo.")] = None,
+    start: Annotated[
+        str | None, typer.Option(help="ISO-8601 UTC; padrão início mais antigo.")
+    ] = None,
     end: Annotated[str | None, typer.Option(help="ISO-8601 UTC; padrão agora.")] = None,
     market_only: Annotated[bool, typer.Option(help="Não coleta on-chain/sentimento.")] = False,
 ) -> None:
@@ -139,7 +139,9 @@ def data_sync(
         end=_datetime(end) if end else utc_now(),
         include_alternatives=not market_only,
     )
-    typer.echo(json.dumps({"data_version": manifest.data_version, "sources": len(manifest.sources)}))
+    typer.echo(
+        json.dumps({"data_version": manifest.data_version, "sources": len(manifest.sources)})
+    )
 
 
 @dataset_app.command("build")
@@ -169,20 +171,34 @@ def _run_experiment(
 ) -> ExperimentResult:
     # Training dependencies (PyTorch, scikit-learn and explainers) are intentionally
     # absent from the small Cloud Run runtime image. Keep them behind training CLIs.
-    from bottrade.training import ExperimentRunner
+    from bottrade.training import CandidateRejectedError, ExperimentRunner
 
     bundle = DatasetBuilder(config).load(Asset(asset), DataArm(arm))
-    result = ExperimentRunner(config).run(
-        bundle,
-        ModelFamily(family),
-        trials=trials,
-        max_search_folds=max_folds,
-        seeds=_seeds(seeds, config),
-        params_override=params_override,
-        phase=phase,
-        selection_lock=selection_lock,
-        selection_role=selection_role,
-    )
+    try:
+        result = ExperimentRunner(config).run(
+            bundle,
+            ModelFamily(family),
+            trials=trials,
+            max_search_folds=max_folds,
+            seeds=_seeds(seeds, config),
+            params_override=params_override,
+            phase=phase,
+            selection_lock=selection_lock,
+            selection_role=selection_role,
+        )
+    except CandidateRejectedError as exc:
+        typer.echo(
+            json.dumps(
+                {
+                    "status": "rejected",
+                    "reason": str(exc),
+                    "record": str(exc.rejection_path),
+                },
+                indent=2,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=2) from exc
     metadata_path = result.registry_path / "metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     write_model_card(metadata, result.registry_path / "MODEL_CARD.md")
@@ -210,7 +226,9 @@ def train(
     family: Annotated[str, typer.Option(help="random_forest ou transformer.")],
     arm: Annotated[str, typer.Option(help="Braço de dados.")] = "market",
     trials: Annotated[int, typer.Option(min=1, max=30)] = 30,
-    max_folds: Annotated[int | None, typer.Option(help="Limite opcional para pesquisa rápida.")] = None,
+    max_folds: Annotated[
+        int | None, typer.Option(help="Limite opcional para pesquisa rápida.")
+    ] = None,
     seeds: Annotated[str | None, typer.Option(help="Seeds separadas por vírgula.")] = None,
     config_path: ConfigOption = None,
 ) -> None:
@@ -338,7 +356,9 @@ def holdout(
 def promote(
     asset: Annotated[str, typer.Option()],
     version: Annotated[str, typer.Option()],
-    slot: Annotated[str, typer.Option(help="champion, challenger ou market_fallback.")] = "champion",
+    slot: Annotated[
+        str, typer.Option(help="champion, challenger ou market_fallback.")
+    ] = "champion",
     stage: Annotated[str, typer.Option(help="development, canary ou paper.")] = "canary",
     config_path: ConfigOption = None,
 ) -> None:
@@ -687,9 +707,7 @@ def doctor(config_path: ConfigOption = None) -> None:
     checks["ledger_reconciliation"] = (
         "ok" if reconciliation["ok"] else "failed:" + ";".join(reconciliation["violations"])
     )
-    with PublicHttpClient(
-        config.market.request_timeout_seconds, config.market.max_retries
-    ) as http:
+    with PublicHttpClient(config.market.request_timeout_seconds, config.market.max_retries) as http:
         client = BinanceClient(config.market, http=http)
         server = client.server_time()
         divergence = abs((utc_now() - server).total_seconds())
@@ -712,9 +730,11 @@ def doctor(config_path: ConfigOption = None) -> None:
             except (FileNotFoundError, ValueError) as exc:
                 status = "optional_not_ready" if slot == "challenger" else "not_ready"
                 checks[f"model_{asset.value}_{slot}"] = f"{status}:{exc}"
-    checks["telegram"] = "configured" if (
-        config.runtime.telegram_bot_token and config.runtime.telegram_chat_id
-    ) else "not_configured"
+    checks["telegram"] = (
+        "configured"
+        if (config.runtime.telegram_bot_token and config.runtime.telegram_chat_id)
+        else "not_configured"
+    )
     checks["dashboard_password"] = (
         "configured" if config.runtime.dashboard_password else "not_configured"
     )

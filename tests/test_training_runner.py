@@ -6,9 +6,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from bottrade.backtest import CalibrationEligibilityError
 from bottrade.dataset import DatasetBundle
 from bottrade.domain import Asset, DataArm, ModelFamily
-from bottrade.training import ExperimentRunner
+from bottrade.training import CandidateRejectedError, ExperimentRunner
 
 
 def test_hyperparameter_search_rejects_an_all_failed_study(app_config, monkeypatch) -> None:
@@ -18,6 +19,51 @@ def test_hyperparameter_search_rejects_an_all_failed_study(app_config, monkeypat
         ValueError, match="no hyperparameter trial produced an eligible calibration strategy"
     ):
         runner.search(object(), ModelFamily.RANDOM_FOREST, [], trials=2)  # type: ignore[arg-type]
+
+
+def test_final_seed_rejection_is_recorded(app_config, monkeypatch, tmp_path) -> None:
+    times = pd.date_range("2024-01-01", "2024-04-30", freq="1h", tz="UTC")
+    frame = pd.DataFrame(
+        {
+            "as_of": times,
+            "feature": np.zeros(len(times)),
+            "target_normalized_return": np.zeros(len(times)),
+            "target_volatility": 0.01,
+            "next_hour_return": 0.0,
+            "reference_close": 100.0,
+        }
+    )
+    dataset = DatasetBundle(
+        asset=Asset.BTCUSDT,
+        arm=DataArm.MARKET,
+        frame=frame,
+        feature_columns=("feature",),
+        data_version="b" * 20,
+        schema_version="features-v3",
+        path=tmp_path / "synthetic.parquet",
+    )
+    app_config.training.train_months = 1
+    app_config.training.calibration_months = 1
+    app_config.training.test_months = 1
+    app_config.training.holdout_start = "2024-05-01T00:00:00Z"
+    runner = ExperimentRunner(app_config)
+
+    def reject(*args, **kwargs):
+        raise CalibrationEligibilityError("activity gate failed")
+
+    monkeypatch.setattr(runner, "_evaluate_fold", reject)
+    with pytest.raises(CandidateRejectedError) as captured:
+        runner.run(
+            dataset,
+            ModelFamily.RANDOM_FOREST,
+            trials=1,
+            seeds=[23],
+            params_override={},
+        )
+    record = json.loads(captured.value.rejection_path.read_text(encoding="utf-8"))
+    assert record["status"] == "rejected"
+    assert record["failed_seed"] == 23
+    assert record["failed_fold"] == "2024-04"
 
 
 def test_random_forest_experiment_runner_writes_reproducible_bundle(app_config, tmp_path) -> None:
