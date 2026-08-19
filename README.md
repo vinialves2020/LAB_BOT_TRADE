@@ -20,6 +20,10 @@ Laboratório reproduzível e bot de paper trading spot `long/flat` para `BTCUSDT
 - O resultado negativo/inconclusivo da V2 está congelado em
   [docs/RESULTS_V2.md](docs/RESULTS_V2.md); a V3 será implementada em módulos
   aditivos, sem abrir o holdout.
+- A V3 adiciona estratégias determinísticas com meta-modelos RF/HGB/Transformer,
+  labels event-driven, persistência com hashes e a CLI `bottrade v3`; o estado
+  executado fica em [docs/V3_PROGRESS.md](docs/V3_PROGRESS.md) e os gates em
+  [docs/ACCEPTANCE_V3.md](docs/ACCEPTANCE_V3.md).
 - Walk-forward 24m/3m/1m, purge/embargo, cinco seeds independentes, custos-base/dobrados, análise por regime e explicabilidade.
 - Trava de seleção anterior ao holdout, holdout inacessível pelo fluxo de desenvolvimento, linhagem de refit e verificação ONNX.
 - Dois ledgers transacionais de 500/1.000 USDT, execução hipotética pelo livro, regras Binance, idempotência, reconciliação e circuit breakers.
@@ -65,6 +69,19 @@ Antes de modelos promovidos, `doctor` pode retornar `model_not_ready`; essa falh
 Antes da primeira execução oficial, inicialize o controle de versão e faça um commit do protocolo/configuração. Cada experimento captura `HEAD` e o estado dirty; sem repositório ele registra `commit=unavailable` e não deve ser aceito como execução acadêmica final.
 
 ## Fluxo experimental oficial
+
+Para a implementação V3, o caminho seguro começa pelo preflight e mantém o
+holdout fechado por padrão:
+
+    bottrade v3 preflight --config config/v3.yaml
+    bottrade v3 features --asset BTCUSDT --output data/processed/v3/BTCUSDT/features.parquet
+    bottrade v3 candidates --asset BTCUSDT --features data/processed/v3/BTCUSDT/features.parquet --output data/processed/v3/BTCUSDT/candidates.parquet
+    bottrade v3 labels --candidates data/processed/v3/BTCUSDT/candidates.parquet --intrahour data/raw/market/BTCUSDT_15m.parquet --output data/processed/v3/BTCUSDT/labels.parquet
+    bottrade v3 deterministic --labels data/processed/v3/BTCUSDT/labels.parquet --output-dir reports/generated/v3/BTCUSDT/deterministic
+
+Os comandos `meta-train`, `portfolio`, `select`, `report` e `holdout` estão
+descritos em [docs/ACCEPTANCE_V3.md](docs/ACCEPTANCE_V3.md). `--params-json`
+marca um smoke-test; resultados assim não podem ser promovidos.
 
 O fluxo V1 abaixo continua apenas para reprodução histórica. Toda nova rodada
 deve apontar explicitamente para `config/v2.yaml`; o holdout permanece fixo e
@@ -157,6 +174,9 @@ O dashboard fica em `http://localhost:8501`. O compose não agenda jobs automati
 - [Deploy em Cloud Run](docs/CLOUD.md)
 - [Critérios de aceite](docs/ACCEPTANCE.md)
 - [Resultados da primeira leva e plano v2](docs/RESULTS_FIRST_RUN.md)
+- [Protocolo V3](docs/PROTOCOL_V3.md)
+- [Critérios de aceite V3](docs/ACCEPTANCE_V3.md)
+- [Estado de implementação V3](docs/V3_PROGRESS.md)
 
 ## Limitações explícitas
 

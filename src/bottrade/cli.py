@@ -21,6 +21,7 @@ from bottrade.reporting import ReportGenerator, write_model_card
 from bottrade.selection import SelectionLock, SelectionManager
 from bottrade.storage import Storage
 from bottrade.utils import ensure_utc, utc_now
+from bottrade.v3.cli import v3_app
 
 if TYPE_CHECKING:
     from bottrade.training import ExperimentResult
@@ -38,6 +39,7 @@ app.add_typer(data_app, name="data")
 app.add_typer(dataset_app, name="dataset")
 app.add_typer(paper_app, name="paper")
 app.add_typer(models_app, name="models")
+app.add_typer(v3_app, name="v3")
 
 ConfigOption = Annotated[
     str | None,
@@ -772,3 +774,7 @@ def doctor(config_path: ConfigOption = None) -> None:
     phase = storage.active_paper_phase()
     checks["paper_phase"] = str(phase["phase"]) if phase else "not_started"
     typer.echo(json.dumps(checks, indent=2))
+
+
+if __name__ == "__main__":
+    app()

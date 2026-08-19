@@ -1,0 +1,68 @@
+project:
+  timezone: UTC
+
+training:
+  protocol_version: v3
+  holdout_start: "2025-08-01T00:00:00Z"
+  holdout_end: "2026-07-31T23:59:59Z"
+  train_months: 24
+  calibration_months: 3
+  test_months: 1
+  purge_hours: 12
+  minimum_pre_holdout_folds: 12
+  seeds: [11, 23, 37, 53, 71]
+
+strategies:
+  decision_interval: 1h
+  execution_interval: 15m
+  lookback_hours: 168
+  max_variants_per_family: 12
+  variants:
+    trend: [trend_ema_6_24_h6, trend_ema_12_48_h12, trend_ema_24_72_h12]
+    reversal: [reversal_3h_z2_h3, reversal_3h_z25_h3, reversal_6h_z2_h6, reversal_6h_z25_h6]
+    breakout: [breakout_24h_h6, breakout_24h_h12, breakout_72h_h6, breakout_72h_h12]
+
+event_labels:
+  horizons: [3, 6, 12]
+  take_profit_vol_multiplier: 0.75
+  stop_loss_vol_multiplier: 1.0
+
+meta_policy:
+  probability_thresholds: [0.55, 0.60]
+  margin_bps: [0, 10, 20]
+
+search:
+  random_forest_trials: 8
+  hist_gradient_boosting_trials: 12
+  transformer_trials: 6
+  persistent_storage: data/optuna_v3.db
+
+costs:
+  fallback_fee_bps_per_leg: 10
+  fallback_spread_bps: 2
+  fallback_slippage_bps: 1
+  stress_multipliers: [1, 2, 3]
+
+portfolio:
+  max_asset_weight: 0.20
+  max_gross_weight: 0.50
+  rebalance_band: 0.02
+  daily_loss_limit: 0.01
+  position_loss_limit: 0.005
+  drawdown_circuit_breaker: 0.08
+  maximum_round_trips_per_asset_day: 2
+
+gates:
+  minimum_portfolio_trades_holdout: 240
+  minimum_portfolio_trades_paper: 120
+  minimum_asset_oos_trades: 60
+  minimum_sharpe: 1.0
+  minimum_sharpe_ci_lower: 0.0
+  minimum_profit_factor: 1.2
+  maximum_drawdown: 0.08
+  minimum_dsr_probability: 0.95
+  maximum_pbo: 0.20
+  minimum_nonnegative_folds: 7
+
+features:
+  schema_version: features-v5
