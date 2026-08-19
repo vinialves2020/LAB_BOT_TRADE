@@ -206,6 +206,39 @@ def concentration_stress(
     return {"without_best_five": without_best, "without_best_month": without_month}
 
 
+def monthly_trade_frequency(
+    trades: pd.DataFrame,
+    *,
+    time_column: str = "exit_time",
+) -> dict[str, float | int]:
+    """Summarize closed-trade frequency without counting partial months."""
+
+    if trades.empty or time_column not in trades:
+        return {
+            "complete_months": 0,
+            "trades_per_month_mean": 0.0,
+            "trades_per_month_min": 0,
+            "trades_per_month_max": 0,
+        }
+    timestamps = pd.to_datetime(trades[time_column], utc=True, errors="coerce").dropna()
+    if timestamps.empty:
+        return {
+            "complete_months": 0,
+            "trades_per_month_mean": 0.0,
+            "trades_per_month_min": 0,
+            "trades_per_month_max": 0,
+        }
+    counts = timestamps.dt.to_period("M").value_counts().sort_index()
+    complete = counts.iloc[1:-1] if len(counts) > 2 else counts.iloc[0:0]
+    values = complete.to_numpy(dtype=float)
+    return {
+        "complete_months": int(len(complete)),
+        "trades_per_month_mean": float(values.mean()) if len(values) else 0.0,
+        "trades_per_month_min": int(values.min()) if len(values) else 0,
+        "trades_per_month_max": int(values.max()) if len(values) else 0,
+    }
+
+
 def evaluate_gates(
     metrics: dict[str, float | int],
     *,
@@ -254,6 +287,12 @@ def evaluate_gates(
         )
         if passing < 4:
             reasons.append("seed_stability_failure")
+    frequency = monthly_trade_frequency(trades)
+    if frequency["complete_months"] > 0:
+        if float(frequency["trades_per_month_mean"]) < config.minimum_trades_per_month:
+            reasons.append("average_monthly_frequency_below_gate")
+        if int(frequency["trades_per_month_min"]) < config.minimum_trades_per_complete_month:
+            reasons.append("monthly_frequency_floor_below_gate")
     output = dict(metrics)
     output.update(
         {
@@ -263,6 +302,7 @@ def evaluate_gates(
             "pbo": pbo,
             "without_best_five": concentration["without_best_five"],
             "without_best_month": concentration["without_best_month"],
+            **frequency,
         }
     )
     return V3GateResult(passed=not reasons, reasons=tuple(reasons), metrics=output)

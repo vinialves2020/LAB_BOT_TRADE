@@ -7,7 +7,7 @@ from typing import Annotated, Any
 import pandas as pd
 import typer
 
-from bottrade.domain import Asset
+from bottrade.domain import Asset, DataArmSpec
 from bottrade.v3.backtest import signal_ceiling_backtest
 from bottrade.v3.candidates import build_candidates
 from bottrade.v3.config import V3Config, load_v3_config
@@ -22,6 +22,7 @@ from bottrade.v3.labels import label_candidates
 from bottrade.v3.meta_models import fit_meta_model
 from bottrade.v3.portfolio import portfolio_backtest
 from bottrade.v3.selection import claim_holdout, create_selection_lock, load_selection_lock
+from bottrade.v3.statistics import daily_compounded_returns, evaluate_gates
 from bottrade.v3.tracking import TrialLedger
 from bottrade.v3.training import (
     build_meta_table,
@@ -48,6 +49,35 @@ def _asset(value: str) -> Asset:
         raise typer.BadParameter("ativo deve ser BTCUSDT, ETHUSDT ou SOLUSDT") from exc
 
 
+def _arm(value: str) -> DataArmSpec:
+    try:
+        return DataArmSpec.from_id(value)
+    except ValueError as exc:
+        raise typer.BadParameter(
+            "arm deve ser market_1h, market_1h_15m, market_1h_15m_derivatives "
+            "ou um sufixo _onchain/_sentiment/_all"
+        ) from exc
+
+
+def _alternative_sources(asset: Asset, arm: DataArmSpec, directory: Path) -> dict[str, pd.DataFrame]:
+    sources: dict[str, pd.DataFrame] = {}
+    if arm.include_onchain:
+        if asset in {Asset.BTCUSDT, Asset.ETHUSDT}:
+            source_name = "btc_coinmetrics.parquet" if asset == Asset.BTCUSDT else "eth_coinmetrics.parquet"
+        else:
+            source_name = "sol_defillama.parquet"
+        source_path = directory / source_name
+        if not source_path.exists():
+            raise typer.BadParameter(f"fonte on-chain não encontrada: {source_path}")
+        sources["onchain"] = pd.read_parquet(source_path)
+    if arm.include_sentiment:
+        source_path = directory / "fear_greed.parquet"
+        if not source_path.exists():
+            raise typer.BadParameter(f"fonte de sentimento não encontrada: {source_path}")
+        sources["sentiment"] = pd.read_parquet(source_path)
+    return sources
+
+
 def _emit(payload: Any, output: Path | None = None) -> None:
     text = json.dumps(payload, indent=2, sort_keys=True, default=str)
     if output is None:
@@ -63,6 +93,13 @@ def _raw_path(directory: Path, asset: Asset, interval: str) -> Path:
     if not path.exists():
         raise typer.BadParameter(f"fonte não encontrada: {path}")
     return path
+
+
+def _raw_paths(directory: Path, arm: DataArmSpec) -> list[Path]:
+    paths = [_raw_path(directory, asset, "1h") for asset in Asset]
+    if arm.include_intrahour:
+        paths.extend(_raw_path(directory, asset, "15m") for asset in Asset)
+    return paths
 
 
 @v3_app.command("preflight")
@@ -98,21 +135,83 @@ def features(
     output: Annotated[Path, typer.Option("--output")],
     config_path: Annotated[Path, typer.Option("--config")] = Path("config/v3.yaml"),
     raw_market_dir: Annotated[Path, typer.Option("--raw-market-dir")] = Path("data/raw/market"),
+    alternative_dir: Annotated[Path, typer.Option("--alternative-dir")] = Path("data/raw/alternative"),
+    processed_dir: Annotated[Path, typer.Option("--processed-dir")] = Path("data/processed"),
+    arm: Annotated[str, typer.Option("--arm")] = "market_1h_15m",
 ) -> None:
     """Build point-in-time 1h + intrahour 15m features before the holdout."""
 
     target = _asset(asset)
     config = _config(config_path)
+    arm_spec = _arm(arm)
     market = {item.value: pd.read_parquet(_raw_path(raw_market_dir, item, "1h")) for item in Asset}
-    intrahour = {item.value: pd.read_parquet(_raw_path(raw_market_dir, item, "15m")) for item in Asset}
-    frame = V3FeatureBuilder(config).build(asset=target, market=market, intrahour=intrahour)
+    intrahour = (
+        {item.value: pd.read_parquet(_raw_path(raw_market_dir, item, "15m")) for item in Asset}
+        if arm_spec.include_intrahour
+        else None
+    )
+    derivatives: dict[str, pd.DataFrame] = {}
+    if arm_spec.include_derivatives:
+        derivative_path = processed_dir / target.value / "market_1h_15m_derivatives.parquet"
+        if not derivative_path.exists():
+            raise typer.BadParameter(f"fonte histórica de derivativos não encontrada: {derivative_path}")
+        derivative_frame = pd.read_parquet(derivative_path)
+        derivative_metrics = {
+            "funding_rate",
+            "premium",
+            "mark_price",
+            "index_price",
+            "basis",
+            "volume",
+            "taker_buy_volume",
+            "taker_sell_volume",
+            "open_interest",
+            "long_short_ratio",
+        }
+        allowed_derivative_columns = {
+            column
+            for column in derivative_frame.columns
+            if column in {"as_of", "derivatives_event_time", "derivatives_available_at"}
+            or (
+                column.startswith("derivatives_")
+                and column.removeprefix("derivatives_").removesuffix("_missing") in derivative_metrics
+            )
+        }
+        derivative_frame = derivative_frame[list(allowed_derivative_columns)]
+        derivative_frame = derivative_frame.rename(
+            columns={
+                "derivatives_event_time": "event_time",
+                "derivatives_available_at": "available_at",
+            }
+        )
+        derivatives[target.value] = derivative_frame
+    alternatives = _alternative_sources(target, arm_spec, alternative_dir)
+    frame = V3FeatureBuilder(config).build(
+        asset=target,
+        market=market,
+        intrahour=intrahour,
+        alternatives=alternatives,
+        derivatives=derivatives,
+        include_intrahour=arm_spec.include_intrahour,
+    )
+    frame["data_arm_id"] = arm_spec.arm_id
     frame = ensure_preholdout(frame, config=config)
+    source_paths = [*_raw_paths(raw_market_dir, arm_spec)]
+    if arm_spec.include_onchain:
+        source_paths.append(
+            alternative_dir
+            / ("btc_coinmetrics.parquet" if target == Asset.BTCUSDT else "eth_coinmetrics.parquet" if target == Asset.ETHUSDT else "sol_defillama.parquet")
+        )
+    if arm_spec.include_sentiment:
+        source_paths.append(alternative_dir / "fear_greed.parquet")
+    if arm_spec.include_derivatives:
+        source_paths.append(derivative_path)
     path = write_versioned_table(
         frame,
         output,
         config=config,
-        table_type=f"features-{target.value}",
-        source_paths=tuple(_raw_path(raw_market_dir, item, interval) for item in Asset for interval in ("1h", "15m")),
+        table_type=f"features-{target.value}-{arm_spec.arm_id}",
+        source_paths=tuple(source_paths),
     )
     _emit({"path": str(path), "rows": len(frame), "columns": len(frame.columns), "manifest": str(manifest_for(path))})
 
@@ -129,7 +228,10 @@ def candidates(
     target = _asset(asset)
     config = _config(config_path)
     frame = read_versioned_table(features_path, config=config)
-    result = build_candidates(frame, asset=target, config=config)
+    arm_id = str(frame["data_arm_id"].iloc[0]) if "data_arm_id" in frame and not frame.empty else "market_1h_15m"
+    arm_spec = _arm(arm_id)
+    families = ("trend", "reversal", "breakout") if arm_spec.include_intrahour else ("trend",)
+    result = build_candidates(frame, asset=target, config=config, families=families)
     path = write_versioned_table(
         result,
         output,
@@ -320,6 +422,45 @@ def portfolio(
         )
         payload[ledger] = {**result.metrics, "trades_path": str(trades_path)}
     _emit(payload, output_dir / "metrics.json")
+
+
+@v3_app.command("gates")
+def gates(
+    metrics_path: Annotated[Path, typer.Option("--metrics")],
+    trades_path: Annotated[Path, typer.Option("--trades")],
+    output: Annotated[Path | None, typer.Option("--output")] = None,
+    config_path: Annotated[Path, typer.Option("--config")] = Path("config/v3.yaml"),
+    metric_index: Annotated[int, typer.Option("--metric-index")] = 0,
+    trials: Annotated[int, typer.Option("--trials")] = 1,
+) -> None:
+    """Apply economic/frequency gates to a saved pre-holdout result."""
+
+    config = _config(config_path)
+    raw = json.loads(metrics_path.read_text(encoding="utf-8"))
+    records = raw if isinstance(raw, list) else [raw]
+    if metric_index < 0 or metric_index >= len(records):
+        raise typer.BadParameter("metric-index fora do arquivo de métricas")
+    metrics = records[metric_index]
+    if not isinstance(metrics, dict):
+        raise typer.BadParameter("métrica selecionada não é um objeto")
+    trades = read_versioned_table(trades_path, config=config)
+    return_column = "net_return" if "net_return" in trades else "net_return_1x"
+    time_column = "exit_time" if "exit_time" in trades else "as_of"
+    raw_returns = pd.to_numeric(trades[return_column], errors="coerce").fillna(0.0)
+    timestamps = pd.to_datetime(trades[time_column], utc=True, errors="coerce")
+    returns = daily_compounded_returns(raw_returns, timestamps)
+    result = evaluate_gates(
+        metrics,
+        config=config,
+        trials=trials,
+        returns=returns,
+        trades=trades,
+        required_trades=config.minimum_asset_oos_trades,
+    )
+    payload = {"passed": result.passed, "reasons": list(result.reasons), "metrics": result.metrics}
+    _emit(payload, output)
+    if not result.passed:
+        raise typer.Exit(code=2)
 
 
 @v3_app.command("select")

@@ -40,6 +40,7 @@ bottrade v3 features --asset BTCUSDT --output data/processed/v3/BTCUSDT/features
 bottrade v3 candidates --asset BTCUSDT --features data/processed/v3/BTCUSDT/features.parquet --output data/processed/v3/BTCUSDT/candidates.parquet
 bottrade v3 labels --candidates data/processed/v3/BTCUSDT/candidates.parquet --intrahour data/raw/market/BTCUSDT_15m.parquet --output data/processed/v3/BTCUSDT/labels.parquet
 bottrade v3 deterministic --labels data/processed/v3/BTCUSDT/labels.parquet --output-dir reports/generated/v3/BTCUSDT/deterministic
+bottrade v3 gates --metrics reports/generated/v3/BTCUSDT/deterministic/metrics.json --trades reports/generated/v3/BTCUSDT/deterministic/trades_1x.parquet
 bottrade v3 meta-train --asset BTCUSDT --family hist_gradient_boosting --features data/processed/v3/BTCUSDT/features.parquet --candidates data/processed/v3/BTCUSDT/candidates.parquet --labels data/processed/v3/BTCUSDT/labels.parquet --output-dir reports/generated/v3/BTCUSDT/hgb
 ```
 

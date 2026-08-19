@@ -14,6 +14,7 @@ def build_candidates(
     asset: Asset,
     config: V3Config,
     costs: CostModel | None = None,
+    families: tuple[str, ...] | None = None,
 ) -> pd.DataFrame:
     """Build all pre-registered candidates for one asset.
 
@@ -26,10 +27,15 @@ def build_candidates(
         fallback_spread_bps=config.fallback_spread_bps,
         fallback_slippage_bps=config.fallback_slippage_bps,
     )
-    generators = (
-        TrendGenerator(config, cost_model),
-        ReversalGenerator(config, cost_model),
-        BreakoutGenerator(config, cost_model),
+    enabled = set(families or ("trend", "reversal", "breakout"))
+    generators = tuple(
+        generator
+        for family, generator in (
+            ("trend", TrendGenerator(config, cost_model)),
+            ("reversal", ReversalGenerator(config, cost_model)),
+            ("breakout", BreakoutGenerator(config, cost_model)),
+        )
+        if family in enabled
     )
     outputs = [generator.generate(frame, asset) for generator in generators]
     outputs = [item for item in outputs if not item.empty]

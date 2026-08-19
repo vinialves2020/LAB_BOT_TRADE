@@ -177,6 +177,65 @@ def _intrahour_features(frame: pd.DataFrame) -> pd.DataFrame:
     return result.reset_index()
 
 
+def _point_in_time_merge(
+    target: pd.DataFrame,
+    source: pd.DataFrame,
+    *,
+    prefix: str,
+    stale_after_hours: float = 72.0,
+) -> pd.DataFrame:
+    """Merge a daily/live source using ``available_at`` only.
+
+    A source row is usable only after its declared availability timestamp.  A
+    missing or stale row remains visible through explicit flags so the policy
+    can fall back to the approved market core without silently imputing data.
+    """
+
+    if source.empty:
+        result = target.copy()
+        result[f"{prefix}_missing"] = 1.0
+        result[f"{prefix}_stale"] = 1.0
+        result[f"{prefix}_age_hours"] = np.nan
+        return result
+    data = source.copy()
+    if "available_at" not in data:
+        if "event_time" not in data:
+            raise ValueError(f"{prefix} source requires event_time or available_at")
+        data["available_at"] = pd.to_datetime(data["event_time"], utc=True) + pd.Timedelta(hours=24)
+    data["available_at"] = pd.to_datetime(data["available_at"], utc=True, errors="coerce")
+    data = data.dropna(subset=["available_at"]).sort_values("available_at")
+    value_columns = [
+        column
+        for column in data.columns
+        if column not in {"event_time", "available_at"}
+        and pd.api.types.is_numeric_dtype(data[column])
+    ]
+    if not value_columns:
+        raise ValueError(f"{prefix} source has no numeric metrics")
+    right = data[["available_at", *value_columns]].drop_duplicates("available_at", keep="last")
+    left = target.sort_values("as_of").copy()
+    merged = pd.merge_asof(
+        left,
+        right,
+        left_on="as_of",
+        right_on="available_at",
+        direction="backward",
+        allow_exact_matches=True,
+    )
+    age = (merged["as_of"] - merged["available_at"]).dt.total_seconds() / 3600.0
+    missing = merged["available_at"].isna()
+    stale = missing | age.gt(stale_after_hours)
+    merged[f"{prefix}_age_hours"] = age
+    merged[f"{prefix}_missing"] = missing.astype(float)
+    merged[f"{prefix}_stale"] = stale.astype(float)
+    rename = {
+        column: f"{prefix}_{column.removeprefix(prefix + '_')}"
+        for column in value_columns
+    }
+    merged = merged.rename(columns=rename).drop(columns=["available_at"], errors="ignore")
+    return merged.sort_values("as_of").reset_index(drop=True)
+
+
 class V3FeatureBuilder:
     """Build point-in-time V3 features from official 1h and 15m candles."""
 
@@ -189,6 +248,9 @@ class V3FeatureBuilder:
         asset: Asset,
         market: Mapping[str, pd.DataFrame],
         intrahour: Mapping[str, pd.DataFrame] | None = None,
+        alternatives: Mapping[str, pd.DataFrame] | None = None,
+        derivatives: Mapping[str, pd.DataFrame] | None = None,
+        include_intrahour: bool = True,
     ) -> pd.DataFrame:
         if asset.value not in market:
             raise KeyError(f"missing target market frame for {asset.value}")
@@ -198,7 +260,7 @@ class V3FeatureBuilder:
         }
         target = prepared[asset.value].copy()
         target_prefix = target.rename(columns={column: column for column in target.columns})
-        if intrahour is not None:
+        if include_intrahour and intrahour is not None:
             for symbol, raw_intrahour in intrahour.items():
                 intra = _intrahour_features(raw_intrahour)
                 if symbol == asset.value:
@@ -252,5 +314,14 @@ class V3FeatureBuilder:
             if intrahour_context_columns
             else 0.0
         )
+        if alternatives:
+            for name, source in alternatives.items():
+                target_prefix = _point_in_time_merge(target_prefix, source, prefix=str(name))
+        if derivatives and asset.value in derivatives:
+            target_prefix = _point_in_time_merge(
+                target_prefix,
+                derivatives[asset.value],
+                prefix="derivatives",
+            )
         target_prefix["as_of"] = pd.to_datetime(target_prefix["as_of"], utc=True)
         return target_prefix.sort_values("as_of").reset_index(drop=True)

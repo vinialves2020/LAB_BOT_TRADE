@@ -56,6 +56,9 @@ gates:
   minimum_portfolio_trades_holdout: 240
   minimum_portfolio_trades_paper: 120
   minimum_asset_oos_trades: 60
+  minimum_trades_per_month: 20
+  minimum_trades_per_complete_month: 10
+  minimum_calibration_trades: 60
   minimum_sharpe: 1.0
   minimum_sharpe_ci_lower: 0.0
   minimum_profit_factor: 1.2

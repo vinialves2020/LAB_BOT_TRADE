@@ -10,6 +10,7 @@ from bottrade.v3.cli import v3_app
 from bottrade.v3.config import load_v3_config
 from bottrade.v3.datasets import ensure_preholdout, write_versioned_table
 from bottrade.v3.portfolio import portfolio_backtest
+from bottrade.v3.statistics import monthly_trade_frequency
 from bottrade.v3.training import build_meta_table, build_transformer_sequences
 
 
@@ -127,3 +128,11 @@ def test_v3_cli_preflight_reports_closed_holdout() -> None:
     result = runner.invoke(v3_app, ["preflight", "--config", "config/v3.yaml"])
     assert result.exit_code == 0, result.output
     assert '"opened": false' in result.output
+
+
+def test_monthly_frequency_ignores_partial_edge_months() -> None:
+    exits = pd.date_range("2024-01-31", periods=5, freq="31D", tz="UTC")
+    trades = pd.DataFrame({"exit_time": exits})
+    frequency = monthly_trade_frequency(trades)
+    assert frequency["complete_months"] == 3
+    assert frequency["trades_per_month_min"] == 1

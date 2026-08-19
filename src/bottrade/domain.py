@@ -54,6 +54,8 @@ class DataArmSpec:
             return legacy[text]
         if text == "market_1h_15m":
             return cls(text, include_intrahour=True)
+        if text == "market_1h":
+            return cls(text)
         if text == "market_1h_15m_derivatives":
             return cls(text, include_intrahour=True, include_derivatives=True)
         if text.endswith("_onchain"):

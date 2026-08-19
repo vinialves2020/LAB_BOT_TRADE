@@ -77,6 +77,28 @@ def test_v3_features_use_four_closed_15m_bars_and_context() -> None:
     assert {"intrahour_drawdown", "intrahour_close_position", "ctx_ETHUSDT_return_1h"}.issubset(frame.columns)
 
 
+def test_v3_alternative_features_use_available_at_and_stale_flags() -> None:
+    config = load_v3_config("config/v3.yaml")
+    market = {asset.value: _market() for asset in Asset}
+    source = pd.DataFrame(
+        {
+            "event_time": pd.to_datetime(["2023-12-31T00:00:00Z"]),
+            "available_at": pd.to_datetime(["2024-01-01T00:00:00Z"]),
+            "metric": [7.0],
+        }
+    )
+    frame = V3FeatureBuilder(config).build(
+        asset=Asset.BTCUSDT,
+        market=market,
+        alternatives={"onchain": source},
+        include_intrahour=False,
+    )
+    first = frame.loc[frame["as_of"] == pd.Timestamp("2024-01-01T01:00:00Z")].iloc[0]
+    assert first["onchain_metric"] == 7.0
+    assert first["onchain_missing"] == 0.0
+    assert first["onchain_stale"] == 0.0
+
+
 def test_v3_candidate_ids_are_stable_and_do_not_contain_labels() -> None:
     config = load_v3_config("config/v3.yaml")
     market = {asset.value: _market() for asset in Asset}

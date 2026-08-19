@@ -47,6 +47,9 @@ class V3Config:
     minimum_portfolio_trades_holdout: int = 240
     minimum_portfolio_trades_paper: int = 120
     minimum_asset_oos_trades: int = 60
+    minimum_trades_per_month: int = 20
+    minimum_trades_per_complete_month: int = 10
+    minimum_calibration_trades: int = 60
     minimum_sharpe: float = 1.0
     minimum_sharpe_ci_lower: float = 0.0
     minimum_profit_factor: float = 1.2
@@ -103,6 +106,15 @@ class V3Config:
             raise ValueError("risk limits must satisfy daily < drawdown < 1")
         if self.minimum_nonnegative_folds < 1 or self.minimum_nonnegative_folds > 12:
             raise ValueError("minimum_nonnegative_folds must be between 1 and 12")
+        if any(
+            value < 1
+            for value in (
+                self.minimum_trades_per_month,
+                self.minimum_trades_per_complete_month,
+                self.minimum_calibration_trades,
+            )
+        ):
+            raise ValueError("trade frequency gates must be positive")
         if any(value <= 0 for value in self.horizons):
             raise ValueError("horizons must be positive")
         if any(not 0 < value <= 1 for value in self.probability_thresholds):
@@ -187,6 +199,18 @@ def load_v3_config(path: str | Path = "config/v3.yaml") -> V3Config:
         ),
         minimum_asset_oos_trades=int(
             gates.get("minimum_asset_oos_trades", defaults.minimum_asset_oos_trades)
+        ),
+        minimum_trades_per_month=int(
+            gates.get("minimum_trades_per_month", defaults.minimum_trades_per_month)
+        ),
+        minimum_trades_per_complete_month=int(
+            gates.get(
+                "minimum_trades_per_complete_month",
+                defaults.minimum_trades_per_complete_month,
+            )
+        ),
+        minimum_calibration_trades=int(
+            gates.get("minimum_calibration_trades", defaults.minimum_calibration_trades)
         ),
         minimum_sharpe=float(gates.get("minimum_sharpe", defaults.minimum_sharpe)),
         minimum_sharpe_ci_lower=float(
