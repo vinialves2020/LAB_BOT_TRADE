@@ -74,6 +74,7 @@ Para a implementação V3, o caminho seguro começa pelo preflight e mantém o
 holdout fechado por padrão:
 
     bottrade v3 preflight --config config/v3.yaml
+    bottrade v3 features --asset BTCUSDT --arm market_1h_15m_derivatives --output data/processed/v3/BTCUSDT/features_derivatives.parquet
     bottrade v3 features --asset BTCUSDT --output data/processed/v3/BTCUSDT/features.parquet
     bottrade v3 candidates --asset BTCUSDT --features data/processed/v3/BTCUSDT/features.parquet --output data/processed/v3/BTCUSDT/candidates.parquet
     bottrade v3 labels --candidates data/processed/v3/BTCUSDT/candidates.parquet --intrahour data/raw/market/BTCUSDT_15m.parquet --output data/processed/v3/BTCUSDT/labels.parquet

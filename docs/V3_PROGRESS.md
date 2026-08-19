@@ -13,6 +13,9 @@
 - validação ONNX com tolerância `1e-4` para RF, HGB e Transformer;
 - dois ledgers de portfólio e limites de risco;
 - CLI `bottrade v3` e manifestos Parquet com hash/schema;
+- braços composíveis com `available_at`, idade, missing/stale e filtro de
+  derivativos sem colunas de alvo;
+- gates mensais de frequência e comando `v3 gates`;
 - holdout fechado por padrão;
 - 11 testes V3 passando.
 
