@@ -1,0 +1,16 @@
+{
+  "status": "interrupted",
+  "reason": "bounded_compute_budget",
+  "asset": "BTCUSDT",
+  "family": "random_forest",
+  "arm": "market_1h_15m",
+  "command": "python -m bottrade v3 meta-train --asset BTCUSDT --family random_forest --features data/processed/v3/BTCUSDT/features.parquet --candidates data/processed/v3/BTCUSDT/candidates.parquet --labels data/processed/v3/BTCUSDT/labels.parquet --output-dir reports/generated/v3/BTCUSDT/rf_official --config config/v3.yaml",
+  "started_at": "2026-08-19T19:49:23Z",
+  "stopped_at": "2026-08-19T20:19:38Z",
+  "wall_time_minutes": 30.25,
+  "cpu_time_observed_hours": 5.31,
+  "seeds_completed": [],
+  "metrics_valid": false,
+  "holdout_claimed": false,
+  "note": "The process was stopped after the bounded compute window. No partial output is a model result or promotion candidate."
+}
