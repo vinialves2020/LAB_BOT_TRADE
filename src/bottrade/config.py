@@ -23,6 +23,7 @@ class ProjectConfig(StrictModel):
 class MarketConfig(StrictModel):
     symbols: dict[str, str]
     interval: str = "1h"
+    additional_intervals: list[str] = Field(default_factory=list)
     quote_asset: str = "USDT"
     archive_base_url: str
     rest_base_url: str
@@ -33,13 +34,31 @@ class MarketConfig(StrictModel):
 
 class FeatureConfig(StrictModel):
     horizon_hours: int = 3
+    forecast_horizons: list[int] = Field(default_factory=lambda: [3, 6, 12])
     lookback_hours: int = 168
     alternative_delay_hours: int = 24
     alternative_stale_hours: int = 72
     market_stale_minutes: int = 75
-    historical_gap_policy: Literal["trim_after_latest_gap"] = "trim_after_latest_gap"
+    historical_gap_policy: Literal["trim_after_latest_gap", "gap_aware_segments"] = (
+        "trim_after_latest_gap"
+    )
+    intrahour_interval: str = "15m"
+    derivatives_stale_hours: int = 72
+    label_cost_bps: float = 24.0
     lag_hours: list[int] = Field(default_factory=lambda: [1, 3, 6, 12, 24, 72, 168])
     arms: list[str]
+
+    @model_validator(mode="after")
+    def validate_horizons(self) -> FeatureConfig:
+        if not self.forecast_horizons or any(value <= 0 for value in self.forecast_horizons):
+            raise ValueError("forecast_horizons must contain positive hours")
+        if self.horizon_hours not in self.forecast_horizons:
+            raise ValueError("horizon_hours must be one of forecast_horizons")
+        if self.lookback_hours < max(self.forecast_horizons):
+            raise ValueError("lookback_hours must cover the largest forecast horizon")
+        if self.label_cost_bps < 0:
+            raise ValueError("label_cost_bps cannot be negative")
+        return self
 
 
 class TransformerConfig(StrictModel):
@@ -54,6 +73,8 @@ class TransformerConfig(StrictModel):
     validation_purge_hours: int = 3
     learning_rate: float = 5e-4
     weight_decay: float = 1e-4
+    patch_length: int = 1
+    patch_stride: int = 1
 
 
 class RandomForestConfig(StrictModel):
@@ -61,6 +82,18 @@ class RandomForestConfig(StrictModel):
     max_depth: int | None = 14
     min_samples_leaf: int = 8
     max_features: float | str = 0.7
+    n_jobs: int = -1
+
+
+class HistGradientBoostingConfig(StrictModel):
+    learning_rate: float = 0.05
+    max_iter: int = 300
+    max_leaf_nodes: int = 31
+    max_depth: int | None = None
+    min_samples_leaf: int = 30
+    l2_regularization: float = 1.0
+    max_bins: int = 255
+    early_stopping: bool = False
     n_jobs: int = -1
 
 
@@ -77,8 +110,41 @@ class TrainingConfig(StrictModel):
     explainability_samples: int = 256
     permutation_repeats: int = 3
     integrated_gradient_steps: int = 32
+    protocol_version: str = "v1"
+    minimum_pre_holdout_folds: int = 1
+    frozen_core_arm: str = "market"
+    probability_thresholds: list[float] = Field(default_factory=lambda: [0.50, 0.55, 0.60])
+    search_families: list[str] = Field(
+        default_factory=lambda: ["random_forest", "transformer"]
+    )
     transformer: TransformerConfig = Field(default_factory=TransformerConfig)
     random_forest: RandomForestConfig = Field(default_factory=RandomForestConfig)
+    hist_gradient_boosting: HistGradientBoostingConfig = Field(
+        default_factory=HistGradientBoostingConfig
+    )
+
+    @model_validator(mode="after")
+    def validate_protocol(self) -> TrainingConfig:
+        if len(self.seeds) < 1:
+            raise ValueError("at least one training seed is required")
+        if self.protocol_version == "v2" and len(self.seeds) < 5:
+            raise ValueError("V2 requires five final seeds")
+        if self.purge_hours < 0:
+            raise ValueError("purge_hours cannot be negative")
+        if any(
+            threshold < 0.0 or threshold > 1.0
+            for threshold in self.probability_thresholds
+        ):
+            raise ValueError("probability thresholds must be between zero and one")
+        allowed_families = {
+            "random_forest",
+            "hist_gradient_boosting",
+            "transformer",
+        }
+        unknown = set(self.search_families) - allowed_families
+        if unknown:
+            raise ValueError(f"unsupported search family: {sorted(unknown)}")
+        return self
 
 
 class BacktestConfig(StrictModel):
@@ -86,8 +152,13 @@ class BacktestConfig(StrictModel):
     friction_bps_per_leg: float = 2.0
     stress_multiplier: float = 2.0
     threshold_margin_bps: list[int]
+    probability_thresholds: list[float] = Field(default_factory=lambda: [0.50, 0.55, 0.60])
     max_holding_hours: int = 12
     minimum_calibration_trades: int = 20
+    minimum_calibration_trades_per_asset: int = 60
+    minimum_monthly_trades: int = 10
+    minimum_average_monthly_trades: int = 20
+    maximum_reference_monthly_trades: int = 40
     maximum_calibration_turnover_per_day: float = 2.0
     annualization_days: int = 365
 
@@ -145,6 +216,10 @@ class GateConfig(StrictModel):
     min_closed_trades: int = 100
     require_positive_stress_return: bool = True
     incident_free_days: int = 90
+    minimum_pre_holdout_folds: int = 12
+    minimum_seed_passes: int = 4
+    maximum_pbo: float = 0.20
+    minimum_dsr_probability: float = 0.95
 
 
 class AppConfig(StrictModel):

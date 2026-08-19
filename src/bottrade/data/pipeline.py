@@ -43,19 +43,26 @@ class DataPipeline:
             max_retries=self.config.market.max_retries,
         ) as http:
             binance = BinanceClient(self.config.market, http=http)
-            for symbol, listing_date in self.config.market.symbols.items():
-                path = self.raw_dir / "market" / f"{symbol}_{self.config.market.interval}.parquet"
-                listed_at = datetime.fromisoformat(listing_date).replace(tzinfo=UTC)
-                frame = binance.sync_history(
-                    symbol,
-                    max(start, listed_at),
-                    end,
-                    path,
-                    manifest,
-                )
-                missing = validate_hourly_continuity(frame)
-                if missing:
-                    LOGGER.warning("%s has %s missing hourly candles", symbol, len(missing))
+            intervals = list(
+                dict.fromkeys([self.config.market.interval, *self.config.market.additional_intervals])
+            )
+            for interval in intervals:
+                for symbol, listing_date in self.config.market.symbols.items():
+                    path = self.raw_dir / "market" / f"{symbol}_{interval}.parquet"
+                    listed_at = datetime.fromisoformat(listing_date).replace(tzinfo=UTC)
+                    frame = binance.sync_history(
+                        symbol,
+                        max(start, listed_at),
+                        end,
+                        path,
+                        manifest,
+                        interval=interval,
+                    )
+                    missing = validate_hourly_continuity(frame) if interval == "1h" else []
+                    if missing:
+                        LOGGER.warning(
+                            "%s has %s missing hourly candles", symbol, len(missing)
+                        )
             if include_alternatives:
                 self._sync_alternatives(http, start, end, manifest)
         stamp = manifest.collected_at.strftime("%Y%m%dT%H%M%SZ")
@@ -142,6 +149,30 @@ class DataPipeline:
             frames[symbol] = pd.read_parquet(path)
         return frames
 
+    def load_intrahour(self) -> dict[str, pd.DataFrame]:
+        """Load optional 15-minute candles used only as hourly features."""
+
+        frames: dict[str, pd.DataFrame] = {}
+        interval = self.config.features.intrahour_interval
+        for symbol in self.config.market.symbols:
+            path = self.raw_dir / "market" / f"{symbol}_{interval}.parquet"
+            frames[symbol] = pd.read_parquet(path) if path.exists() else pd.DataFrame()
+        return frames
+
+    def load_derivatives(self) -> dict[str, pd.DataFrame]:
+        """Load optional archived futures metrics, if present.
+
+        The downloader deliberately does not synthesize these files from the
+        recent-only REST statistics endpoints.  Missing files are represented
+        as empty frames and become auditable stale/missing features.
+        """
+
+        frames: dict[str, pd.DataFrame] = {}
+        for symbol in self.config.market.symbols:
+            path = self.raw_dir / "derivatives" / f"{symbol}.parquet"
+            frames[symbol] = pd.read_parquet(path) if path.exists() else pd.DataFrame()
+        return frames
+
     def load_alternatives(self) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
         mapping = {
             "BTCUSDT": self.raw_dir / "alternative" / "btc_coinmetrics.parquet",
@@ -163,6 +194,25 @@ class DataPipeline:
             binance = BinanceClient(self.config.market, http=http)
             return {
                 symbol: binance.fetch_recent_klines(symbol, limit=limit)
+                for symbol in self.config.market.symbols
+            }
+
+    def recent_intrahour(self, limit: int = 4 * 500) -> dict[str, pd.DataFrame]:
+        """Fetch closed 15-minute candles for V2 feature construction.
+
+        This is read-only market data.  A missing response is returned as an
+        empty frame so the runtime can fail closed when the feature completeness
+        flag is absent rather than opening a position from fabricated bars.
+        """
+
+        interval = self.config.features.intrahour_interval
+        with PublicHttpClient(
+            timeout_seconds=self.config.market.request_timeout_seconds,
+            max_retries=self.config.market.max_retries,
+        ) as http:
+            binance = BinanceClient(self.config.market, http=http)
+            return {
+                symbol: binance.fetch_recent_klines(symbol, limit=limit, interval=interval)
                 for symbol in self.config.market.symbols
             }
 

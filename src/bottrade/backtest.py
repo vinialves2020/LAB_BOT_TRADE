@@ -7,6 +7,7 @@ import pandas as pd
 
 from bottrade.config import BacktestConfig
 from bottrade.metrics import PerformanceMetrics, calculate_performance, compound_returns
+from bottrade.multihorizon import monthly_trade_gate, select_horizon_forecast
 
 
 class CalibrationEligibilityError(ValueError):
@@ -22,6 +23,88 @@ class BacktestResult:
     cost_multiplier: float
 
 
+@dataclass(frozen=True, slots=True)
+class CostAwarePolicy:
+    probability_threshold: float
+    margin_bps: float
+    round_trip_cost: float
+    activity: dict[str, float | int | bool]
+
+
+def select_cost_aware_policy(
+    frame: pd.DataFrame,
+    expected_gross_returns: dict[int, np.ndarray],
+    probabilities: dict[int, np.ndarray],
+    config: BacktestConfig,
+    *,
+    position_size: float = 1.0,
+) -> CostAwarePolicy:
+    """Select a frozen probability/cost policy on a calibration slice."""
+
+    horizons = tuple(sorted(expected_gross_returns))
+    if horizons != tuple(sorted(probabilities)):
+        raise ValueError("expected return and probability horizons differ")
+    candidates: list[CostAwarePolicy] = []
+    for probability_threshold in config.probability_thresholds:
+        for margin_bps in config.threshold_margin_bps:
+            signals: list[float] = []
+            planned_horizons: list[float] = []
+            for row in range(len(frame)):
+                choice = select_horizon_forecast(
+                    horizons=horizons,
+                    expected_gross_returns=(expected_gross_returns[h][row] for h in horizons),
+                    probabilities=(probabilities[h][row] for h in horizons),
+                    round_trip_cost=config.round_trip_cost,
+                    probability_threshold=probability_threshold,
+                    margin_bps=margin_bps,
+                )
+                signals.append(1.0 if choice is not None else 0.0)
+                planned_horizons.append(float(choice.horizon_hours) if choice else np.nan)
+            signal_count = int(np.sum(signals))
+            result = simulate_long_flat(
+                frame,
+                np.asarray(signals, dtype=float),
+                threshold_return=0.5,
+                cost_per_leg=config.cost_per_leg,
+                max_holding_hours=config.max_holding_hours,
+                annualization_days=config.annualization_days,
+                position_size=position_size,
+                selected_horizons=np.asarray(planned_horizons, dtype=float),
+            )
+            activity = monthly_trade_gate(
+                result.trades,
+                start_time=frame["as_of"].min() if len(frame) else None,
+                end_time=frame["as_of"].max() if len(frame) else None,
+            )
+            activity["calibration_closed_trades"] = signal_count
+            candidates.append(
+                CostAwarePolicy(
+                    probability_threshold=probability_threshold,
+                    margin_bps=float(margin_bps),
+                    round_trip_cost=config.round_trip_cost,
+                    activity=activity | {"sortino": result.metrics.sortino},
+                )
+            )
+    eligible = [
+        item
+        for item in candidates
+        if int(item.activity.get("calibration_closed_trades", 0))
+        >= max(config.minimum_calibration_trades, config.minimum_calibration_trades_per_asset)
+        and bool(item.activity.get("passed", False))
+        and float(item.activity.get("sortino", -np.inf)) > -np.inf
+    ]
+    if not eligible:
+        raise CalibrationEligibilityError("no cost-aware policy passed calibration")
+    return max(
+        eligible,
+        key=lambda item: (
+            float(item.activity.get("sortino", -np.inf)),
+            int(item.activity.get("calibration_closed_trades", 0)),
+            -item.margin_bps,
+        ),
+    )
+
+
 def simulate_long_flat(
     frame: pd.DataFrame,
     predictions: np.ndarray | pd.Series,
@@ -35,9 +118,17 @@ def simulate_long_flat(
     daily_loss_limit: float | None = None,
     position_loss_limit: float | None = None,
     drawdown_circuit_breaker: float | None = None,
+    selected_horizons: np.ndarray | pd.Series | None = None,
 ) -> BacktestResult:
     if len(frame) != len(predictions):
         raise ValueError("predictions and frame must have equal length")
+    planned_horizons = (
+        np.asarray(selected_horizons, dtype=float)
+        if selected_horizons is not None
+        else np.full(len(frame), float(max_holding_hours), dtype=float)
+    )
+    if len(planned_horizons) != len(frame):
+        raise ValueError("selected horizons and frame must have equal length")
     data = frame[["as_of", "next_hour_return"]].copy().reset_index(drop=True)
     data["prediction"] = np.asarray(predictions, dtype=float)
     positions: list[float] = []
@@ -50,6 +141,7 @@ def simulate_long_flat(
     entry_time: pd.Timestamp | None = None
     trade_growth = 1.0
     trade_cost = 0.0
+    planned_holding = float(max_holding_hours)
     turnover = 0.0
     leg_cost = cost_per_leg * cost_multiplier
     if not 0 < position_size <= 1:
@@ -99,7 +191,9 @@ def simulate_long_flat(
             desired = position_size
             reason = "entry_signal"
         elif position > 0.0 and (
-            not np.isfinite(row.prediction) or row.prediction <= 0.0 or held >= max_holding_hours
+            not np.isfinite(row.prediction)
+            or row.prediction <= 0.0
+            or held >= planned_holding
         ):
             desired = 0.0
             reason = (
@@ -114,6 +208,13 @@ def simulate_long_flat(
         if delta > 0:
             entry_time = pd.Timestamp(row.as_of)
             held = 0
+            row_index = len(positions)
+            candidate_holding = planned_horizons[row_index]
+            planned_holding = (
+                max(1.0, float(candidate_holding))
+                if np.isfinite(candidate_holding)
+                else float(max_holding_hours)
+            )
             trade_growth = 1.0
             trade_cost = cost
         hourly_return = desired * float(row.next_hour_return) - cost

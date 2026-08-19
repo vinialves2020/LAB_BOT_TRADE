@@ -9,7 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from bottrade.config import AppConfig
-from bottrade.domain import Asset, DataArm, ModelFamily
+from bottrade.domain import Asset, DataArm, DataArmSpec, ModelFamily
 from bottrade.utils import content_hash, sha256_file, utc_now
 
 
@@ -29,7 +29,7 @@ class SelectionLock(BaseModel):
     chosen_run_id: str = ""
     chosen_version: str = ""
     family: ModelFamily | None = None
-    data_arm: DataArm | None = None
+    data_arm: DataArm | str | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
     data_version: str = ""
     feature_schema_version: str = ""
@@ -53,6 +53,11 @@ class SelectionManager:
         if not path.exists():
             raise FileNotFoundError(f"selection lock is missing for {asset.value}")
         lock = SelectionLock.model_validate_json(path.read_text(encoding="utf-8"))
+        if lock.protocol_version != self.config.training.protocol_version:
+            raise ValueError(
+                f"selection lock protocol {lock.protocol_version} does not match "
+                f"configured {self.config.training.protocol_version}"
+            )
         expected_id = content_hash(
             [
                 {
@@ -96,11 +101,23 @@ class SelectionManager:
                 records.append(record)
         return records
 
+    def _families(self) -> tuple[ModelFamily, ...]:
+        return tuple(ModelFamily(value) for value in self.config.training.search_families)
+
+    @staticmethod
+    def _arm_id(value: str) -> str:
+        return DataArmSpec.from_id(value).arm_id
+
     def _family_rejections(self, asset: Asset) -> dict[str, dict[str, Any]]:
         root = self.config.project.artifact_dir / "experiments" / asset.value
         records: dict[str, list[dict[str, Any]]] = {}
         if not root.exists():
             return {}
+        search_arm = (
+            self.config.training.frozen_core_arm
+            if self.config.training.protocol_version == "v2"
+            else DataArm.MARKET.value
+        )
         for path in root.rglob("rejections/*.json"):
             record = json.loads(path.read_text(encoding="utf-8"))
             source_control = record.get("source_control", {})
@@ -110,7 +127,7 @@ class SelectionManager:
                 and record.get("scope") == "family"
                 and record.get("phase") == "development"
                 and record.get("asset") == asset.value
-                and record.get("data_arm") == DataArm.MARKET.value
+                and record.get("data_arm") == search_arm
                 and bool(record.get("protocol_rejection_eligible"))
                 and source_control.get("commit") not in {None, "", "unavailable"}
                 and source_control.get("dirty") is False
@@ -141,6 +158,16 @@ class SelectionManager:
         for name in ("sortino", "sharpe", "max_drawdown", "total_return"):
             if not math.isfinite(float(metrics.get(name, math.nan))):
                 reasons.append(f"invalid_{name}")
+        if self.config.training.protocol_version == "v2":
+            statistical = record.get("statistical_metrics", {})
+            if float(statistical.get("deflated_sharpe_probability", 0.0)) < self.config.gates.minimum_dsr_probability:
+                reasons.append("deflated_sharpe_below_gate")
+            if float(statistical.get("pbo", 1.0)) > self.config.gates.maximum_pbo:
+                reasons.append("pbo_above_gate")
+            if not bool(statistical.get("seed_stability_passed", False)):
+                reasons.append("seed_stability_below_gate")
+            if not bool(statistical.get("activity_gate_passed", False)):
+                reasons.append("monthly_activity_below_gate")
         return reasons
 
     def select(self, asset: Asset) -> SelectionLock:
@@ -149,11 +176,14 @@ class SelectionManager:
             raise FileExistsError(
                 f"selection is immutable and already exists: {destination}; start a new protocol version"
             )
-        required = [
-            f"{family.value}:{DataArm(arm).value}"
-            for family in (ModelFamily.RANDOM_FOREST, ModelFamily.TRANSFORMER)
-            for arm in self.config.features.arms
-        ]
+        families = self._families()
+        arms = tuple(self._arm_id(arm) for arm in self.config.features.arms)
+        core_arm = (
+            self.config.training.frozen_core_arm
+            if self.config.training.protocol_version == "v2"
+            else DataArm.MARKET.value
+        )
+        required = [f"{family.value}:{arm}" for family in families for arm in arms]
         records = self._records(asset)
         family_rejections = self._family_rejections(asset)
         by_key: dict[str, list[dict[str, Any]]] = {}
@@ -162,8 +192,8 @@ class SelectionManager:
             by_key.setdefault(key, []).append(record)
         rejected_families = {
             family.value
-            for family in (ModelFamily.RANDOM_FOREST, ModelFamily.TRANSFORMER)
-            if f"{family.value}:{DataArm.MARKET.value}" not in by_key
+            for family in families
+            if f"{family.value}:{core_arm}" not in by_key
             and family.value in family_rejections
         }
         missing = [
@@ -173,21 +203,21 @@ class SelectionManager:
         ]
         if missing:
             raise ValueError(
-                "cannot freeze selection before all eight protocol outcomes exist: "
+                "cannot freeze selection before all eight or required protocol outcomes exist: "
                 + ", ".join(missing)
             )
         selected_records: dict[str, dict[str, Any]] = {}
-        for family in (ModelFamily.RANDOM_FOREST, ModelFamily.TRANSFORMER):
+        for family in families:
             if family.value in rejected_families:
                 continue
-            market_key = f"{family.value}:{DataArm.MARKET.value}"
+            market_key = f"{family.value}:{core_arm}"
             market_record = sorted(
                 by_key[market_key],
                 key=lambda item: str(item.get("created_at", item.get("version", ""))),
             )[-1]
             selected_records[market_key] = market_record
-            for arm in self.config.features.arms:
-                key = f"{family.value}:{DataArm(arm).value}"
+            for arm in arms:
+                key = f"{family.value}:{arm}"
                 if key == market_key:
                     continue
                 matching = [
@@ -241,8 +271,13 @@ class SelectionManager:
                 eligible.append(record)
 
         def rank_key(item: dict[str, Any]) -> tuple[float, float, float]:
+            sortino_key = (
+                "median_fold_stress_sortino"
+                if self.config.training.protocol_version == "v2"
+                else "median_fold_sortino"
+            )
             return (
-                float(item.get("median_fold_sortino", -1_000_000.0)),
+                float(item.get(sortino_key, item.get("median_fold_sortino", -1_000_000.0))),
                 -float(item["selection_metrics"].get("max_drawdown", 1.0)),
                 float(item["selection_stress_metrics"].get("total_return", -1.0)),
             )
@@ -306,12 +341,17 @@ class SelectionManager:
             chosen_run_id=chosen["run_id"] if chosen else "",
             chosen_version=chosen["version"] if chosen else "",
             family=ModelFamily(chosen["family"]) if chosen else None,
-            data_arm=DataArm(chosen["arm"]) if chosen else None,
+            data_arm=(
+                DataArm(chosen["arm"])
+                if chosen and chosen["arm"] in {item.value for item in DataArm}
+                else chosen["arm"] if chosen else None
+            ),
             parameters=chosen["parameters"] if chosen else {},
             data_version=chosen["data_version"] if chosen else "",
             feature_schema_version=chosen["feature_schema_version"] if chosen else "",
             experiment_path=chosen["experiment_path"] if chosen else "",
             experiment_sha256=chosen["experiment_sha256"] if chosen else "",
+            protocol_version=self.config.training.protocol_version,
         )
         self._write(lock)
         return lock

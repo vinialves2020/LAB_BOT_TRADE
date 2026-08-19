@@ -103,6 +103,10 @@ class ForecastRow(Base):
     data_arm: Mapped[str] = mapped_column(String(32))
     is_fallback: Mapped[bool] = mapped_column(default=False)
     is_shadow: Mapped[bool] = mapped_column(default=False)
+    horizons: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    selected_horizon_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    policy_version: Mapped[str] = mapped_column(String(32), default="v1")
+    ensemble_id: Mapped[str] = mapped_column(String(80), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     __table_args__ = (
         UniqueConstraint("asset", "as_of", "model_version", name="uq_forecast_cycle_model"),
@@ -284,6 +288,22 @@ class Storage:
             if "is_shadow" not in existing_forecast_columns:
                 connection.execute(
                     text("ALTER TABLE forecast ADD COLUMN is_shadow BOOLEAN NOT NULL DEFAULT 0")
+                )
+            if "horizons" not in existing_forecast_columns:
+                connection.execute(
+                    text("ALTER TABLE forecast ADD COLUMN horizons JSON NOT NULL DEFAULT '[]'")
+                )
+            if "selected_horizon_hours" not in existing_forecast_columns:
+                connection.execute(
+                    text("ALTER TABLE forecast ADD COLUMN selected_horizon_hours INTEGER")
+                )
+            if "policy_version" not in existing_forecast_columns:
+                connection.execute(
+                    text("ALTER TABLE forecast ADD COLUMN policy_version VARCHAR(32) NOT NULL DEFAULT 'v1'")
+                )
+            if "ensemble_id" not in existing_forecast_columns:
+                connection.execute(
+                    text("ALTER TABLE forecast ADD COLUMN ensemble_id VARCHAR(80) NOT NULL DEFAULT ''")
                 )
             existing_phase_columns = {
                 column["name"] for column in inspect(self.engine).get_columns("paper_phase")
@@ -681,9 +701,24 @@ class Storage:
                 model_family=forecast.model_family.value,
                 model_version=forecast.model_version,
                 data_version=forecast.data_version,
-                data_arm=forecast.data_arm.value,
+                data_arm=getattr(forecast.data_arm, "value", str(forecast.data_arm)),
                 is_fallback=forecast.is_fallback,
                 is_shadow=forecast.is_shadow,
+                horizons=[
+                    {
+                        "horizon_hours": item.horizon_hours,
+                        "expected_gross_return": item.expected_gross_return,
+                        "expected_net_return": item.expected_net_return,
+                        "probability_net_positive": item.probability_net_positive,
+                        "threshold_probability": item.threshold_probability,
+                        "cost_margin_bps": item.cost_margin_bps,
+                        "lower_bound_return": item.lower_bound_return,
+                    }
+                    for item in forecast.horizons
+                ],
+                selected_horizon_hours=forecast.selected_horizon_hours,
+                policy_version=forecast.policy_version,
+                ensemble_id=forecast.ensemble_id or "",
             )
             session.add(row)
             try:
@@ -992,6 +1027,10 @@ class Storage:
                     "data_arm": row.data_arm,
                     "is_fallback": row.is_fallback,
                     "is_shadow": row.is_shadow,
+                    "horizons": row.horizons or [],
+                    "selected_horizon_hours": row.selected_horizon_hours,
+                    "policy_version": row.policy_version,
+                    "ensemble_id": row.ensemble_id,
                 }
                 for row in reversed(rows)
             ]

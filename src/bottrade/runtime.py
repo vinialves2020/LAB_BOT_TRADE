@@ -10,9 +10,10 @@ import pandas as pd
 from bottrade.config import AppConfig
 from bottrade.data.binance import validate_hourly_continuity
 from bottrade.data.pipeline import DataPipeline
-from bottrade.domain import Asset, DataArm, Forecast
+from bottrade.domain import Asset, DataArm, DataArmSpec, Forecast
 from bottrade.features import FeatureBuilder, FeatureFrame
 from bottrade.models.registry import ModelMetadata, ModelRegistry, OnnxPredictor
+from bottrade.multihorizon import select_horizon_forecast
 from bottrade.utils import sha256_bytes, utc_now
 
 LOGGER = logging.getLogger(__name__)
@@ -39,15 +40,31 @@ class RuntimeInferenceService:
         return metadata, OnnxPredictor(directory, metadata)
 
     @staticmethod
-    def _alternative_is_stale(feature_frame: FeatureFrame, arm: DataArm) -> bool:
+    def _alternative_is_stale(
+        feature_frame: FeatureFrame, arm: DataArm | DataArmSpec | str
+    ) -> bool:
+        spec = DataArmSpec.from_id(arm)
         latest = feature_frame.frame.iloc[-1]
+        if spec.include_intrahour:
+            completeness = [
+                column
+                for column in feature_frame.frame.columns
+                if column.endswith("_intrahour_complete")
+            ]
+            if completeness and any(float(latest.get(column, 0.0)) < 1.0 for column in completeness):
+                return True
         if (
-            arm in {DataArm.MARKET_ONCHAIN, DataArm.MARKET_ALL}
+            spec.include_onchain
             and float(latest.get("onchain_stale", 1.0)) >= 1.0
         ):
             return True
+        if (
+            spec.include_derivatives
+            and float(latest.get("derivatives_stale", 1.0)) >= 1.0
+        ):
+            return True
         return bool(
-            arm in {DataArm.MARKET_SENTIMENT, DataArm.MARKET_ALL}
+            spec.include_sentiment
             and float(latest.get("sentiment_stale", 1.0)) >= 1.0
         )
 
@@ -61,6 +78,8 @@ class RuntimeInferenceService:
         enabled = set(Asset) if active_assets is None else set(active_assets)
         raw_limit = max(500, self.config.features.lookback_hours * 3)
         market = self.pipeline.recent_market(limit=raw_limit)
+        intrahour: dict[str, pd.DataFrame] = {}
+        derivatives: dict[str, pd.DataFrame] = {}
         market_timestamps: list[pd.Timestamp] = []
         for symbol, frame in market.items():
             required_history = (
@@ -108,6 +127,19 @@ class RuntimeInferenceService:
             except FileNotFoundError:
                 LOGGER.warning("No active champion for %s; asset remains cash", asset.value)
                 continue
+            arm_spec = DataArmSpec.from_id(metadata.data_arm)
+            if arm_spec.include_intrahour and not intrahour:
+                try:
+                    intrahour = self.pipeline.recent_intrahour(limit=4 * raw_limit)
+                except (AttributeError, OSError, RuntimeError, ValueError) as exc:
+                    LOGGER.warning("15m source unavailable; V2 arm will fail closed: %s", exc)
+                    intrahour = {symbol: pd.DataFrame() for symbol in self.config.market.symbols}
+            if arm_spec.include_derivatives and not derivatives:
+                try:
+                    derivatives = self.pipeline.load_derivatives()
+                except (AttributeError, OSError, RuntimeError, ValueError) as exc:
+                    LOGGER.warning("derivative archive unavailable; V2 arm will fail closed: %s", exc)
+                    derivatives = {symbol: pd.DataFrame() for symbol in self.config.market.symbols}
             featured = self.features.build(
                 asset=asset,
                 market=market,
@@ -115,6 +147,8 @@ class RuntimeInferenceService:
                 sentiment=sentiment,
                 arm=metadata.data_arm,
                 include_labels=False,
+                intrahour=intrahour,
+                derivatives=derivatives,
             )
             fallback = False
             if self._alternative_is_stale(featured, metadata.data_arm):
@@ -145,6 +179,31 @@ class RuntimeInferenceService:
             if not np.isfinite(volatility) or volatility <= 0:
                 raise ValueError(f"invalid live volatility for {asset.value}")
             expected_return = normalized_prediction * volatility
+            horizon_forecasts = ()
+            selected_horizon = None
+            if predictor.horizon_sessions:
+                horizon_forecasts = predictor.predict_horizons(
+                    values,
+                    volatility=volatility,
+                    round_trip_cost=self.config.backtest.round_trip_cost,
+                    probability_threshold=metadata.probability_threshold,
+                    margin_bps=metadata.cost_margin_bps,
+                )
+                selected_horizon = select_horizon_forecast(
+                    horizons=(item.horizon_hours for item in horizon_forecasts),
+                    expected_gross_returns=(
+                        item.expected_gross_return for item in horizon_forecasts
+                    ),
+                    probabilities=(
+                        item.probability_net_positive for item in horizon_forecasts
+                    ),
+                    round_trip_cost=self.config.backtest.round_trip_cost,
+                    probability_threshold=metadata.probability_threshold,
+                    margin_bps=metadata.cost_margin_bps,
+                )
+                expected_return = (
+                    selected_horizon.expected_gross_return if selected_horizon else 0.0
+                )
             as_of = pd.Timestamp(latest["as_of"])
             if as_of.tzinfo is None:
                 as_of = as_of.tz_localize("UTC")
@@ -153,7 +212,11 @@ class RuntimeInferenceService:
             forecasts[asset] = Forecast(
                 asset=asset,
                 as_of=as_of.to_pydatetime(),
-                horizon_hours=metadata.horizon_hours,
+                horizon_hours=(
+                    selected_horizon.horizon_hours
+                    if selected_horizon is not None
+                    else metadata.horizon_hours
+                ),
                 expected_return=expected_return,
                 model_family=metadata.family,
                 model_version=metadata.version,
@@ -161,6 +224,12 @@ class RuntimeInferenceService:
                 data_arm=metadata.data_arm,
                 threshold_return=metadata.threshold_return,
                 is_fallback=fallback,
+                horizons=tuple(horizon_forecasts),
+                selected_horizon_hours=(
+                    selected_horizon.horizon_hours if selected_horizon is not None else None
+                ),
+                policy_version=metadata.policy_version,
+                ensemble_id=metadata.ensemble_id or None,
             )
             try:
                 shadow_metadata, shadow_predictor = self._active_bundle(asset, "challenger")
@@ -171,6 +240,8 @@ class RuntimeInferenceService:
                     sentiment=sentiment,
                     arm=shadow_metadata.data_arm,
                     include_labels=False,
+                    intrahour=intrahour,
+                    derivatives=derivatives,
                 )
                 if self._alternative_is_stale(shadow_featured, shadow_metadata.data_arm):
                     raise ValueError("challenger alternative data is stale")

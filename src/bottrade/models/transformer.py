@@ -54,12 +54,25 @@ class TemporalTransformer(nn.Module):
         dropout: float,
         calendar_hour_index: int | None = None,
         calendar_day_index: int | None = None,
+        patch_length: int = 1,
+        patch_stride: int = 1,
+        horizon_count: int = 1,
     ) -> None:
         super().__init__()
         self.sequence_length = sequence_length
+        self.patch_length = int(patch_length)
+        self.patch_stride = int(patch_stride)
+        if self.patch_length < 1 or self.patch_stride < 1:
+            raise ValueError("patch_length and patch_stride must be positive")
+        if self.patch_length > sequence_length:
+            raise ValueError("patch_length cannot exceed sequence_length")
+        self.n_patches = 1 + (sequence_length - self.patch_length) // self.patch_stride
+        self.horizon_count = int(horizon_count)
+        if self.horizon_count < 1:
+            raise ValueError("horizon_count must be positive")
         self.calendar_hour_index = calendar_hour_index
         self.calendar_day_index = calendar_day_index
-        self.input_projection = nn.Linear(n_features, d_model)
+        self.input_projection = nn.Linear(n_features * self.patch_length, d_model)
         if calendar_hour_index is not None and calendar_day_index is not None:
             mask = torch.ones(n_features, dtype=torch.float32)
             mask[calendar_hour_index] = 0.0
@@ -71,7 +84,7 @@ class TemporalTransformer(nn.Module):
             self.register_buffer("numeric_feature_mask", torch.ones(n_features))
             self.hour_embedding = None
             self.day_embedding = None
-        self.position = nn.Parameter(torch.zeros(1, sequence_length, d_model))
+        self.position = nn.Parameter(torch.zeros(1, self.n_patches, d_model))
         nn.init.trunc_normal_(self.position, std=0.02)
         layer = nn.TransformerEncoderLayer(
             d_model=d_model,
@@ -84,25 +97,48 @@ class TemporalTransformer(nn.Module):
         )
         self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
         self.normalization = nn.LayerNorm(d_model)
-        self.head = nn.Sequential(
+        self.regression_head = nn.Sequential(
             nn.Linear(d_model, max(16, d_model // 2)),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(max(16, d_model // 2), 1),
+            nn.Linear(max(16, d_model // 2), self.horizon_count),
         )
+        self.head = self.regression_head
+        self.classification_head: nn.Module | None = None
+        if self.horizon_count > 1:
+            self.classification_head = nn.Sequential(
+                nn.Linear(d_model, max(16, d_model // 2)),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(max(16, d_model // 2), self.horizon_count),
+            )
 
     def forward(self, sequence: torch.Tensor) -> torch.Tensor:
         numeric = sequence * self.numeric_feature_mask
-        encoded = self.input_projection(numeric) + self.position[:, : sequence.shape[1]]
+        if self.patch_length == 1 and self.patch_stride == 1:
+            tokens = numeric
+        else:
+            patches = numeric.unfold(1, self.patch_length, self.patch_stride)
+            tokens = patches.transpose(2, 3).reshape(
+                sequence.shape[0], self.n_patches, -1
+            )
+        encoded = self.input_projection(tokens) + self.position[:, : tokens.shape[1]]
         if self.hour_embedding is not None and self.day_embedding is not None:
             if self.calendar_hour_index is None or self.calendar_day_index is None:
                 raise RuntimeError("calendar embedding indices are not configured")
-            hour = sequence[:, :, self.calendar_hour_index].round().long().clamp(0, 23)
-            day = sequence[:, :, self.calendar_day_index].round().long().clamp(0, 6)
+            hour = sequence[:, self.patch_length - 1 :: self.patch_stride, self.calendar_hour_index]
+            day = sequence[:, self.patch_length - 1 :: self.patch_stride, self.calendar_day_index]
+            hour = hour.round().long().clamp(0, 23)
+            day = day.round().long().clamp(0, 6)
             encoded = encoded + self.hour_embedding(hour) + self.day_embedding(day)
         encoded = self.encoder(encoded)
         last = self.normalization(encoded[:, -1])
-        return self.head(last).squeeze(-1)
+        regression = self.regression_head(last)
+        if self.horizon_count == 1:
+            return regression.squeeze(-1)
+        if self.classification_head is None:
+            raise RuntimeError("multi-horizon classification head is not configured")
+        return regression, self.classification_head(last)
 
 
 class TransformerRegressorModel(ResearchRegressor):
@@ -133,8 +169,13 @@ class TransformerRegressorModel(ResearchRegressor):
             "num_layers",
             "dim_feedforward",
             "dropout",
+            "patch_length",
+            "patch_stride",
         }
-        architecture = {key: self.params[key] for key in architecture_keys}
+        architecture = {
+            key: self.params.get(key, 1 if key in {"patch_length", "patch_stride"} else None)
+            for key in architecture_keys
+        }
         if architecture["d_model"] % architecture["nhead"] != 0:
             raise ValueError("d_model must be divisible by nhead")
         self.network = TemporalTransformer(
@@ -324,6 +365,8 @@ class TransformerRegressorModel(ResearchRegressor):
                     "mean": self.standardizer.mean,
                     "scale": self.standardizer.scale,
                 },
+                "patch_length": self.network.patch_length,
+                "patch_stride": self.network.patch_stride,
             },
             path,
         )

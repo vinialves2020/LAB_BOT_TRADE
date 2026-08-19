@@ -20,8 +20,73 @@ class DataArm(StrEnum):
     MARKET_ALL = "market_all"
 
 
+@dataclass(frozen=True, slots=True)
+class DataArmSpec:
+    """Point-in-time description of a feature arm.
+
+    ``DataArm`` is kept for V1 compatibility.  V2 arms are composable so that
+    the same core can be ablated with derivatives, on-chain and sentiment data
+    without adding another enum value for every possible combination.
+    """
+
+    arm_id: str
+    include_intrahour: bool = False
+    include_derivatives: bool = False
+    include_onchain: bool = False
+    include_sentiment: bool = False
+    parent_id: str | None = None
+    schema_version: str = "arm-v2"
+
+    @classmethod
+    def from_id(cls, value: str | DataArm | DataArmSpec) -> DataArmSpec:
+        if isinstance(value, cls):
+            return value
+        text = str(value.value if isinstance(value, DataArm) else value)
+        legacy = {
+            DataArm.MARKET.value: cls("market", parent_id=None),
+            DataArm.MARKET_ONCHAIN.value: cls("market_onchain", include_onchain=True),
+            DataArm.MARKET_SENTIMENT.value: cls("market_sentiment", include_sentiment=True),
+            DataArm.MARKET_ALL.value: cls(
+                "market_all", include_onchain=True, include_sentiment=True
+            ),
+        }
+        if text in legacy:
+            return legacy[text]
+        if text == "market_1h_15m":
+            return cls(text, include_intrahour=True)
+        if text == "market_1h_15m_derivatives":
+            return cls(text, include_intrahour=True, include_derivatives=True)
+        if text.endswith("_onchain"):
+            parent = text.removesuffix("_onchain")
+            base = cls.from_id(parent)
+            return cls(text, base.include_intrahour, base.include_derivatives, True, base.include_sentiment, parent)
+        if text.endswith("_sentiment"):
+            parent = text.removesuffix("_sentiment")
+            base = cls.from_id(parent)
+            return cls(text, base.include_intrahour, base.include_derivatives, base.include_onchain, True, parent)
+        if text.endswith("_all"):
+            parent = text.removesuffix("_all")
+            base = cls.from_id(parent)
+            return cls(text, base.include_intrahour, base.include_derivatives, True, True, parent)
+        raise ValueError(f"unsupported data arm: {value}")
+
+    @property
+    def components(self) -> tuple[str, ...]:
+        values = ["market_1h"]
+        if self.include_intrahour:
+            values.append("intrahour_15m")
+        if self.include_derivatives:
+            values.append("derivatives")
+        if self.include_onchain:
+            values.append("onchain")
+        if self.include_sentiment:
+            values.append("sentiment")
+        return tuple(values)
+
+
 class ModelFamily(StrEnum):
     RANDOM_FOREST = "random_forest"
+    HIST_GRADIENT_BOOSTING = "hist_gradient_boosting"
     TRANSFORMER = "transformer"
     RIDGE = "ridge"
 
@@ -51,6 +116,20 @@ class FeatureSnapshot:
     values: dict[str, float]
     schema_version: str
     stale_flags: tuple[str, ...] = ()
+    continuity_segment_id: str | None = None
+    source_coverage: dict[str, float] = field(default_factory=dict)
+    source_freshness_hours: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class HorizonForecast:
+    horizon_hours: int
+    expected_gross_return: float
+    expected_net_return: float
+    probability_net_positive: float
+    threshold_probability: float = 0.5
+    cost_margin_bps: float = 0.0
+    lower_bound_return: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,10 +141,14 @@ class Forecast:
     model_family: ModelFamily
     model_version: str
     data_version: str
-    data_arm: DataArm
+    data_arm: DataArm | DataArmSpec | str
     threshold_return: float
     is_fallback: bool = False
     is_shadow: bool = False
+    horizons: tuple[HorizonForecast, ...] = ()
+    selected_horizon_hours: int | None = None
+    policy_version: str = "v1"
+    ensemble_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

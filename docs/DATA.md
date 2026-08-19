@@ -8,6 +8,15 @@ Arquivos mensais são verificados pelo checksum publicado. Arquivo ausente usa R
 
 Um candle entra no pipeline somente depois de `as_of = open_time + 1h`. A continuidade dos três mercados é validada antes de inferência; um gap em qualquer contexto bloqueia novas entradas naquele ciclo.
 
+Na V2, os arquivos `*_15m.parquet` são sincronizados pela mesma rotina. Somente
+as quatro barras encerradas até o fechamento horário são agregadas; falta de uma
+das quatro barras vira indicador de completude, nunca preço interpolado.
+
+Derivativos são exclusivamente informacionais: funding, premium, mark/index,
+basis, volume/agressão e open interest quando o arquivo histórico oficial é
+verificável. Endpoints que só expõem histórico recente ficam em shadow e não
+entram no treino retrospectivo.
+
 ## Coin Metrics comunitária
 
 BTC e ETH usam, inicialmente:
@@ -38,7 +47,11 @@ Fear & Greed de 0 a 100. É geral, diário, centrado em Bitcoin e parcialmente c
 - Cada linha inclui `event_time`, `available_at`, idade, `missing` e `stale`.
 - Idade superior a 72h obriga fallback market-only no runtime.
 - Mercado com mais de 75 minutos sem último candle fechado bloqueia o job signal.
-- O dataset bruto nunca é preenchido com preço sintético. Na construção histórica, os três mercados são cortados para o intervalo comum iniciado uma hora após a lacuna mais recente; a política, o corte e todas as lacunas excluídas entram no manifesto. Assim, shifts nunca atravessam um buraco como se fosse uma hora válida. No runtime, qualquer gap recente continua bloqueando novas entradas.
+- O dataset bruto nunca é preenchido com preço sintético. A V1 preserva o corte
+  após a última lacuna; a V2 mantém os trechos e grava `continuity_segment_id`.
+  Uma amostra V2 só é válida se lookback, próximo open e horizonte máximo
+  estiverem no mesmo segmento; qualquer gap recente continua bloqueando novas
+  entradas.
 - Infinitos viram missing; imputadores são ajustados apenas no treino.
 - Uma falha ao buscar fonte alternativa não contamina a construção market-only; o runtime usa o fallback previamente congelado. Não existe substituição automática de fonte que altere o schema.
 
@@ -49,14 +62,22 @@ Fear & Greed de 0 a 100. É geral, diário, centrado em Bitcoin e parcialmente c
 - Z-score de volume, range e número de negócios.
 - Corpo/range do candle e razão compradora agressora.
 - Contexto dos três ativos.
+- Na V2, caminho intrahorário 15m, volatilidade realizada, range,
+  drawup/drawdown, concentração/aceleração de volume, negócios e agressão.
 - Seno/cosseno e índices de hora UTC/dia da semana. O Transformer transforma os índices em embeddings aprendidos; o RF recebe sua representação tabular.
 
-## Label
+## Labels
 
-Retorno logarítmico entre a abertura do próximo candle e o fechamento três horas adiante, dividido pelo desvio EWMA dos retornos horários estritamente conhecidos. Uma linha rotulada só existe quando o candle no fim desse horizonte está confirmado como fechado. A EWMA usa uma janela dura de 168 observações, `alpha = 2 / 169`, e não carrega memória de períodos anteriores. O backtest usa retornos horários seguintes e aplica custo a cada mudança de posição.
+Na V1, retorno logarítmico entre a abertura do próximo candle e o fechamento
+três horas adiante, dividido pelo desvio EWMA dos retornos horários
+estritamente conhecidos. Na V2, o mesmo cálculo existe para 3h, 6h e 12h e
+também gera a classe `retorno bruto > 24 bps`. A volatilidade usa janela dura
+de 168 observações (`alpha = 2 / 169`) e não carrega memória de períodos
+anteriores. O backtest usa retornos horários seguintes e aplica custo a cada
+mudança de posição.
 
 ## Versionamento
 
-Cada fonte registra período solicitado, URL, caminho, SHA-256, número de linhas, limites temporais, schema de colunas e horário de coleta. Os datasets processados preservam `event_time` e `available_at` prefixados por fonte para auditoria point-in-time. Cada dataset processado recebe hash de conteúdo e manifest próprio. O hash, a lista ordenada de features e `features-v3` entram no metadata e na trava de seleção.
+Cada fonte registra período solicitado, URL, caminho, SHA-256, número de linhas, limites temporais, schema de colunas e horário de coleta. Os datasets processados preservam `event_time` e `available_at` prefixados por fonte para auditoria point-in-time. Cada dataset processado recebe hash de conteúdo e manifest próprio. O hash, a lista ordenada de features e a versão de schema (`features-v3` V1 ou `features-v4` V2) entram no metadata e na trava de seleção.
 
 Datasets e versões de modelo são append-only para fins de auditoria. Uma mudança de metodologia do provedor, schema ou disponibilidade cria nova versão; ela não reescreve silenciosamente um experimento concluído.

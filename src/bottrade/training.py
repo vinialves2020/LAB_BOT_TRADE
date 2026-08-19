@@ -24,7 +24,7 @@ from bottrade.backtest import (
     simulate_long_flat,
 )
 from bottrade.config import AppConfig
-from bottrade.dataset import DatasetBundle
+from bottrade.dataset import DatasetBundle, arm_id
 from bottrade.domain import DataArm, ModelFamily, RunStage
 from bottrade.explainability import explain_model, write_explanations
 from bottrade.metrics import (
@@ -34,10 +34,24 @@ from bottrade.metrics import (
     calculate_predictive,
 )
 from bottrade.models.base import ResearchRegressor
-from bottrade.models.random_forest import RandomForestRegressorModel, RidgeRegressorModel
+from bottrade.models.multihorizon import MultiHorizonPrediction, MultiHorizonTabularModel
+from bottrade.models.random_forest import (
+    HistGradientBoostingRegressorModel,
+    RandomForestRegressorModel,
+    RidgeRegressorModel,
+    SeedEnsembleRegressorModel,
+)
 from bottrade.models.registry import ModelMetadata, ModelRegistry
+from bottrade.models.transformer_ensemble import TransformerSeedEnsembleModel
+from bottrade.models.transformer_multihorizon import TransformerMultiHorizonModel
+from bottrade.multihorizon import (
+    SigmoidCalibrator,
+    monthly_trade_gate,
+    select_horizon_forecast,
+)
 from bottrade.regimes import aggregate_regime_analyses, analyze_regimes
 from bottrade.selection import SelectionLock
+from bottrade.statistics import v2_statistical_gates
 from bottrade.utils import deterministic_id, set_global_seed, sha256_file, utc_now
 from bottrade.validation import WalkForwardFold, walk_forward_folds
 
@@ -80,6 +94,8 @@ class EvaluatedFold:
     predictions: np.ndarray
     actual: np.ndarray
     regimes: dict[str, dict[str, float | int]]
+    probability_threshold: float = 0.5
+    cost_margin_bps: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +115,7 @@ class ExperimentResult:
     folds: list[FoldEvaluation]
     bundle_path: Path
     registry_path: Path
+    statistical_metrics: dict[str, float | bool] | None = None
 
 
 def _aggregate_backtests(
@@ -238,7 +255,7 @@ class ExperimentRunner:
             "rejected",
             dataset.asset.value,
             family.value,
-            dataset.arm.value,
+            arm_id(dataset.arm),
             dataset.data_version,
             params,
             seed,
@@ -250,7 +267,7 @@ class ExperimentRunner:
             self.config.project.artifact_dir
             / "experiments"
             / dataset.asset.value
-            / dataset.arm.value
+            / arm_id(dataset.arm)
             / family.value
             / "rejections"
         )
@@ -263,7 +280,7 @@ class ExperimentRunner:
             "phase": phase,
             "asset": dataset.asset.value,
             "family": family.value,
-            "data_arm": dataset.arm.value,
+            "data_arm": arm_id(dataset.arm),
             "data_version": dataset.data_version,
             "feature_schema_version": dataset.schema_version,
             "parameters": params,
@@ -301,7 +318,11 @@ class ExperimentRunner:
             self.config.project.artifact_dir
             / "experiments"
             / dataset.asset.value
-            / DataArm.MARKET.value
+            / (
+                self.config.training.frozen_core_arm
+                if self.config.training.protocol_version == "v2"
+                else DataArm.MARKET.value
+            )
             / family.value
             / "rejections"
         )
@@ -321,7 +342,7 @@ class ExperimentRunner:
             "phase": "development",
             "asset": dataset.asset.value,
             "family": family.value,
-            "data_arm": dataset.arm.value,
+            "data_arm": arm_id(dataset.arm),
             "data_version": dataset.data_version,
             "feature_schema_version": dataset.schema_version,
             "trials_requested": trials,
@@ -330,7 +351,12 @@ class ExperimentRunner:
             "reason": "no hyperparameter trial produced an eligible calibration strategy",
             "source_control": source_control,
             "protocol_rejection_eligible": bool(
-                dataset.arm == DataArm.MARKET
+                arm_id(dataset.arm)
+                == (
+                    self.config.training.frozen_core_arm
+                    if self.config.training.protocol_version == "v2"
+                    else DataArm.MARKET.value
+                )
                 and trials >= self.config.training.max_trials
                 and max_search_folds is None
                 and clean_source
@@ -344,6 +370,8 @@ class ExperimentRunner:
     def _default_params(self, family: ModelFamily) -> dict[str, Any]:
         if family == ModelFamily.RANDOM_FOREST:
             return self.config.training.random_forest.model_dump()
+        if family == ModelFamily.HIST_GRADIENT_BOOSTING:
+            return self.config.training.hist_gradient_boosting.model_dump()
         if family == ModelFamily.TRANSFORMER:
             return self.config.training.transformer.model_dump()
         if family == ModelFamily.RIDGE:
@@ -361,6 +389,8 @@ class ExperimentRunner:
     ) -> ResearchRegressor:
         if family == ModelFamily.RANDOM_FOREST:
             return RandomForestRegressorModel(params=params, seed=seed)
+        if family == ModelFamily.HIST_GRADIENT_BOOSTING:
+            return HistGradientBoostingRegressorModel(params=params, seed=seed)
         if family == ModelFamily.RIDGE:
             return RidgeRegressorModel(alpha=float(params.get("alpha", 1.0)))
         if family == ModelFamily.TRANSFORMER:
@@ -380,6 +410,63 @@ class ExperimentRunner:
                 ),
             )
         raise ValueError(f"unsupported family: {family}")
+
+    def _final_model(
+        self,
+        family: ModelFamily,
+        params: dict[str, Any],
+        *,
+        n_features: int,
+        seeds: list[int],
+        feature_names: tuple[str, ...] | list[str] | None = None,
+    ) -> ResearchRegressor:
+        """Construct the deployment estimator without selecting a seed winner."""
+
+        if (
+            self.config.training.protocol_version == "v2"
+            and len(seeds) >= 5
+        ):
+            if family == ModelFamily.TRANSFORMER:
+                names = list(feature_names or [])
+                return TransformerSeedEnsembleModel(
+                    n_features=n_features,
+                    sequence_length=self.config.features.lookback_hours,
+                    params=params,
+                    seeds=list(seeds),
+                    calendar_hour_index=(
+                        names.index("calendar_hour_index")
+                        if "calendar_hour_index" in names
+                        else None
+                    ),
+                    calendar_day_index=(
+                        names.index("calendar_day_index")
+                        if "calendar_day_index" in names
+                        else None
+                    ),
+                )
+            if family not in {
+                ModelFamily.RANDOM_FOREST,
+                ModelFamily.HIST_GRADIENT_BOOSTING,
+            }:
+                return self._model(
+                    family,
+                    params,
+                    n_features=n_features,
+                    seed=seeds[0],
+                    feature_names=feature_names,
+                )
+            return SeedEnsembleRegressorModel(
+                family=family.value,
+                params=params,
+                seeds=list(seeds),
+            )
+        return self._model(
+            family,
+            params,
+            n_features=n_features,
+            seed=seeds[0],
+            feature_names=feature_names,
+        )
 
     @staticmethod
     def _normalized_dataset(dataset: DatasetBundle) -> DatasetBundle:
@@ -401,6 +488,381 @@ class ExperimentRunner:
         y = dataset.frame["target_normalized_return"].to_numpy(dtype=np.float64)
         return x, y
 
+    def _evaluate_fold_v2_tabular(
+        self,
+        *,
+        dataset: DatasetBundle,
+        family: ModelFamily,
+        params: dict[str, Any],
+        fold: WalkForwardFold,
+        seed: int,
+    ) -> EvaluatedFold:
+        """Evaluate the cost-aware multi-horizon policy on one walk-forward fold."""
+
+        x, y = self._arrays(dataset)
+        horizons = tuple(self.config.features.forecast_horizons)
+        model = MultiHorizonTabularModel(
+            family=family,
+            params=params,
+            horizons=horizons,
+            seed=seed,
+        )
+        model.fit(x, dataset.frame, fold.train_indices)
+        calibration_frame = dataset.frame.iloc[fold.calibration_indices].reset_index(drop=True)
+        test_frame = dataset.frame.iloc[fold.test_indices].reset_index(drop=True)
+        calibration_volatility = calibration_frame["target_volatility"].to_numpy(dtype=float)
+        test_volatility = test_frame["target_volatility"].to_numpy(dtype=float)
+        calibration_prediction = model.predict(
+            x, fold.calibration_indices, calibration_volatility
+        )
+        test_prediction = model.predict(x, fold.test_indices, test_volatility)
+
+        # Calibration observations are outside the fit window, so the sigmoid
+        # never sees in-sample probabilities.
+        calibrators = {}
+        calibration_probabilities: dict[int, np.ndarray] = {}
+        for horizon in horizons:
+            labels = calibration_frame[f"label_tradeable_{horizon}h"].to_numpy(dtype=float)
+            calibrator = SigmoidCalibrator().fit(
+                calibration_prediction.probabilities[horizon], labels
+            )
+            calibrators[horizon] = calibrator
+            calibration_probabilities[horizon] = calibrator.predict(
+                calibration_prediction.probabilities[horizon]
+            )
+        test_probabilities = {
+            horizon: calibrators[horizon].predict(test_prediction.probabilities[horizon])
+            for horizon in horizons
+        }
+
+        def _policy_result(
+            frame: pd.DataFrame,
+            prediction: Any,
+            probabilities: dict[int, np.ndarray],
+            probability_threshold: float,
+            margin_bps: float,
+            cost_multiplier: float = 1.0,
+        ) -> tuple[BacktestResult, np.ndarray]:
+            choices, _ = model.select(
+                MultiHorizonPrediction(
+                    horizons=prediction.horizons,
+                    normalized_returns=prediction.normalized_returns,
+                    gross_returns=prediction.gross_returns,
+                    probabilities=probabilities,
+                ),
+                round_trip_cost=self.config.backtest.round_trip_cost * cost_multiplier,
+                probability_threshold=probability_threshold,
+                margin_bps=margin_bps,
+            )
+            gross = np.asarray(
+                [choice.expected_gross_return if choice is not None else 0.0 for choice in choices],
+                dtype=float,
+            )
+            selected_horizons = np.asarray(
+                [choice.horizon_hours if choice is not None else np.nan for choice in choices],
+                dtype=float,
+            )
+            result = simulate_long_flat(
+                frame,
+                gross,
+                threshold_return=(
+                    self.config.backtest.round_trip_cost * cost_multiplier
+                    + margin_bps / 10_000.0
+                ),
+                cost_per_leg=self.config.backtest.cost_per_leg,
+                max_holding_hours=self.config.backtest.max_holding_hours,
+                annualization_days=self.config.backtest.annualization_days,
+                cost_multiplier=cost_multiplier,
+                position_size=self.config.paper.max_asset_weight,
+                daily_loss_limit=self.config.paper.daily_loss_limit,
+                position_loss_limit=self.config.paper.position_loss_limit,
+                drawdown_circuit_breaker=self.config.paper.drawdown_circuit_breaker,
+                selected_horizons=selected_horizons,
+            )
+            return result, selected_horizons
+
+        candidates: list[tuple[float, float, BacktestResult]] = []
+        for probability_threshold in self.config.training.probability_thresholds:
+            for margin_bps in self.config.backtest.threshold_margin_bps:
+                result, _ = _policy_result(
+                    calibration_frame,
+                    calibration_prediction,
+                    calibration_probabilities,
+                    probability_threshold,
+                    float(margin_bps),
+                )
+                activity = result.metrics
+                turnover_per_day = activity.turnover / max(len(calibration_frame) / 24.0, 1.0)
+                monthly_activity = monthly_trade_gate(
+                    result.trades,
+                    start_time=calibration_frame["as_of"].min(),
+                    end_time=calibration_frame["as_of"].max(),
+                    minimum_average=self.config.backtest.minimum_average_monthly_trades,
+                    minimum_month=self.config.backtest.minimum_monthly_trades,
+                )
+                if (
+                    activity.closed_trades
+                    >= max(
+                        self.config.backtest.minimum_calibration_trades,
+                        self.config.backtest.minimum_calibration_trades_per_asset,
+                    )
+                    and turnover_per_day <= self.config.backtest.maximum_calibration_turnover_per_day
+                    and bool(monthly_activity["passed"])
+                ):
+                    candidates.append((float(probability_threshold), float(margin_bps), result))
+        if not candidates:
+            raise CalibrationEligibilityError(
+                "no V2 probability/margin policy passed calibration activity gates"
+            )
+        probability_threshold, margin_bps, calibration_best = max(
+            candidates,
+            key=lambda item: (
+                item[2].metrics.sortino,
+                item[2].metrics.total_return,
+                -item[2].metrics.max_drawdown,
+            ),
+        )
+        normal, _ = _policy_result(
+            test_frame,
+            test_prediction,
+            test_probabilities,
+            probability_threshold,
+            margin_bps,
+        )
+        stress, _ = _policy_result(
+            test_frame,
+            test_prediction,
+            test_probabilities,
+            probability_threshold,
+            margin_bps,
+            cost_multiplier=self.config.backtest.stress_multiplier,
+        )
+        default_horizon = self.config.features.horizon_hours
+        test_normalized = test_prediction.normalized_returns[default_horizon]
+        return EvaluatedFold(
+            normal=normal,
+            stress=stress,
+            threshold=self.config.backtest.round_trip_cost + margin_bps / 10_000.0,
+            predictive=calculate_predictive(y[fold.test_indices], test_normalized),
+            predictions=test_normalized,
+            actual=y[fold.test_indices],
+            regimes=analyze_regimes(
+                test_frame, normal.timeline["strategy_return"], normal.timeline["position"]
+            ),
+            probability_threshold=float(probability_threshold),
+            cost_margin_bps=float(margin_bps),
+        )
+
+    def _evaluate_fold_v2_transformer(
+        self,
+        *,
+        dataset: DatasetBundle,
+        params: dict[str, Any],
+        fold: WalkForwardFold,
+        seed: int,
+    ) -> EvaluatedFold:
+        x, y = self._arrays(dataset)
+        horizons = tuple(self.config.features.forecast_horizons)
+        regression_targets = np.column_stack(
+            [dataset.frame[f"target_normalized_return_{horizon}h"] for horizon in horizons]
+        ).astype(float)
+        classification_targets = np.column_stack(
+            [dataset.frame[f"label_tradeable_{horizon}h"] for horizon in horizons]
+        ).astype(float)
+        model = TransformerMultiHorizonModel(
+            n_features=x.shape[1],
+            sequence_length=self.config.features.lookback_hours,
+            horizons=horizons,
+            params=params,
+            seed=seed,
+            calendar_hour_index=(
+                dataset.feature_columns.index("calendar_hour_index")
+                if "calendar_hour_index" in dataset.feature_columns
+                else None
+            ),
+            calendar_day_index=(
+                dataset.feature_columns.index("calendar_day_index")
+                if "calendar_day_index" in dataset.feature_columns
+                else None
+            ),
+        )
+        model.fit(x, regression_targets, classification_targets, fold.train_indices)
+        calibration_indices = fold.calibration_indices
+        test_indices = fold.test_indices
+        calibration_volatility = dataset.frame.iloc[calibration_indices][
+            "target_volatility"
+        ].to_numpy(dtype=float)
+        test_volatility = dataset.frame.iloc[test_indices]["target_volatility"].to_numpy(dtype=float)
+        calibration_regression, calibration_probability_raw = model.predict(x, calibration_indices)
+        test_regression, test_probability_raw = model.predict(x, test_indices)
+        calibration_prediction = MultiHorizonPrediction(
+            horizons=horizons,
+            normalized_returns={
+                horizon: calibration_regression[:, position]
+                for position, horizon in enumerate(horizons)
+            },
+            gross_returns={
+                horizon: calibration_regression[:, position] * calibration_volatility
+                for position, horizon in enumerate(horizons)
+            },
+            probabilities={
+                horizon: calibration_probability_raw[:, position]
+                for position, horizon in enumerate(horizons)
+            },
+        )
+        test_prediction = MultiHorizonPrediction(
+            horizons=horizons,
+            normalized_returns={
+                horizon: test_regression[:, position]
+                for position, horizon in enumerate(horizons)
+            },
+            gross_returns={
+                horizon: test_regression[:, position] * test_volatility
+                for position, horizon in enumerate(horizons)
+            },
+            probabilities={
+                horizon: test_probability_raw[:, position]
+                for position, horizon in enumerate(horizons)
+            },
+        )
+        calibration_probabilities: dict[int, np.ndarray] = {}
+        calibrators: dict[int, SigmoidCalibrator] = {}
+        calibration_frame = dataset.frame.iloc[calibration_indices].reset_index(drop=True)
+        test_frame = dataset.frame.iloc[test_indices].reset_index(drop=True)
+        for horizon in horizons:
+            calibrator = SigmoidCalibrator().fit(
+                calibration_prediction.probabilities[horizon],
+                calibration_frame[f"label_tradeable_{horizon}h"].to_numpy(dtype=float),
+            )
+            calibrators[horizon] = calibrator
+            calibration_probabilities[horizon] = calibrator.predict(
+                calibration_prediction.probabilities[horizon]
+            )
+        test_probabilities = {
+            horizon: calibrators[horizon].predict(test_prediction.probabilities[horizon])
+            for horizon in horizons
+        }
+
+        def _policy_result(
+            frame: pd.DataFrame,
+            prediction: MultiHorizonPrediction,
+            probabilities: dict[int, np.ndarray],
+            probability_threshold: float,
+            margin_bps: float,
+            cost_multiplier: float = 1.0,
+        ) -> BacktestResult:
+            choices: list[Any] = []
+            for row in range(len(frame)):
+                choices.append(
+                    select_horizon_forecast(
+                        horizons=prediction.horizons,
+                        expected_gross_returns=(
+                            prediction.gross_returns[horizon][row]
+                            for horizon in prediction.horizons
+                        ),
+                        probabilities=(probabilities[horizon][row] for horizon in prediction.horizons),
+                        round_trip_cost=self.config.backtest.round_trip_cost * cost_multiplier,
+                        probability_threshold=probability_threshold,
+                        margin_bps=margin_bps,
+                    )
+                )
+            gross = np.asarray(
+                [choice.expected_gross_return if choice else 0.0 for choice in choices],
+                dtype=float,
+            )
+            selected_horizons = np.asarray(
+                [choice.horizon_hours if choice else np.nan for choice in choices],
+                dtype=float,
+            )
+            return simulate_long_flat(
+                frame,
+                gross,
+                threshold_return=(
+                    self.config.backtest.round_trip_cost * cost_multiplier
+                    + margin_bps / 10_000.0
+                ),
+                cost_per_leg=self.config.backtest.cost_per_leg,
+                cost_multiplier=cost_multiplier,
+                max_holding_hours=self.config.backtest.max_holding_hours,
+                annualization_days=self.config.backtest.annualization_days,
+                position_size=self.config.paper.max_asset_weight,
+                daily_loss_limit=self.config.paper.daily_loss_limit,
+                position_loss_limit=self.config.paper.position_loss_limit,
+                drawdown_circuit_breaker=self.config.paper.drawdown_circuit_breaker,
+                selected_horizons=selected_horizons,
+            )
+
+        candidates: list[tuple[float, float, BacktestResult]] = []
+        for probability_threshold in self.config.training.probability_thresholds:
+            for margin_bps in self.config.backtest.threshold_margin_bps:
+                result = _policy_result(
+                    calibration_frame,
+                    calibration_prediction,
+                    calibration_probabilities,
+                    probability_threshold,
+                    float(margin_bps),
+                )
+                turnover_per_day = result.metrics.turnover / max(len(calibration_frame) / 24.0, 1.0)
+                monthly_activity = monthly_trade_gate(
+                    result.trades,
+                    start_time=calibration_frame["as_of"].min(),
+                    end_time=calibration_frame["as_of"].max(),
+                    minimum_average=self.config.backtest.minimum_average_monthly_trades,
+                    minimum_month=self.config.backtest.minimum_monthly_trades,
+                )
+                if (
+                    result.metrics.closed_trades
+                    >= max(
+                        self.config.backtest.minimum_calibration_trades,
+                        self.config.backtest.minimum_calibration_trades_per_asset,
+                    )
+                    and turnover_per_day <= self.config.backtest.maximum_calibration_turnover_per_day
+                    and bool(monthly_activity["passed"])
+                ):
+                    candidates.append((float(probability_threshold), float(margin_bps), result))
+        if not candidates:
+            raise CalibrationEligibilityError(
+                "no V2 Transformer probability/margin policy passed calibration gates"
+            )
+        probability_threshold, margin_bps, _ = max(
+            candidates,
+            key=lambda item: (
+                item[2].metrics.sortino,
+                item[2].metrics.total_return,
+                -item[2].metrics.max_drawdown,
+            ),
+        )
+        normal = _policy_result(
+            test_frame,
+            test_prediction,
+            test_probabilities,
+            probability_threshold,
+            margin_bps,
+        )
+        stress = _policy_result(
+            test_frame,
+            test_prediction,
+            test_probabilities,
+            probability_threshold,
+            margin_bps,
+            self.config.backtest.stress_multiplier,
+        )
+        default_horizon = self.config.features.horizon_hours
+        test_normalized = test_prediction.normalized_returns[default_horizon]
+        return EvaluatedFold(
+            normal=normal,
+            stress=stress,
+            threshold=self.config.backtest.round_trip_cost + margin_bps / 10_000.0,
+            predictive=calculate_predictive(y[test_indices], test_normalized),
+            predictions=test_normalized,
+            actual=y[test_indices],
+            regimes=analyze_regimes(
+                test_frame, normal.timeline["strategy_return"], normal.timeline["position"]
+            ),
+            probability_threshold=float(probability_threshold),
+            cost_margin_bps=float(margin_bps),
+        )
+
     def _evaluate_fold(
         self,
         *,
@@ -411,6 +873,32 @@ class ExperimentRunner:
         seeds: list[int],
     ) -> EvaluatedFold:
         x, y = self._arrays(dataset)
+        if (
+            self.config.training.protocol_version == "v2"
+            and family in {
+                ModelFamily.RANDOM_FOREST,
+                ModelFamily.HIST_GRADIENT_BOOSTING,
+            }
+            and len(seeds) == 1
+        ):
+            return self._evaluate_fold_v2_tabular(
+                dataset=dataset,
+                family=family,
+                params=params,
+                fold=fold,
+                seed=seeds[0],
+            )
+        if (
+            self.config.training.protocol_version == "v2"
+            and family == ModelFamily.TRANSFORMER
+            and len(seeds) == 1
+        ):
+            return self._evaluate_fold_v2_transformer(
+                dataset=dataset,
+                params=params,
+                fold=fold,
+                seed=seeds[0],
+            )
         calibration_predictions: list[np.ndarray] = []
         test_predictions: list[np.ndarray] = []
         for seed in seeds:
@@ -529,6 +1017,25 @@ class ExperimentRunner:
                     "min_samples_leaf": trial.suggest_int("min_samples_leaf", 3, 20),
                     "max_features": trial.suggest_float("max_features", 0.4, 1.0),
                     "n_jobs": defaults.get("n_jobs", -1),
+                }
+            elif family == ModelFamily.HIST_GRADIENT_BOOSTING:
+                params = {
+                    **defaults,
+                    "learning_rate": trial.suggest_float(
+                        "learning_rate", 0.02, 0.15, log=True
+                    ),
+                    "max_iter": trial.suggest_int("max_iter", 150, 500, step=50),
+                    "max_leaf_nodes": trial.suggest_categorical(
+                        "max_leaf_nodes", [15, 31, 63]
+                    ),
+                    "max_depth": trial.suggest_categorical("max_depth", [None, 6, 10]),
+                    "min_samples_leaf": trial.suggest_int(
+                        "min_samples_leaf", 10, 80, step=10
+                    ),
+                    "l2_regularization": trial.suggest_float(
+                        "l2_regularization", 1e-4, 10.0, log=True
+                    ),
+                    "early_stopping": False,
                 }
             else:
                 d_model = trial.suggest_categorical("d_model", [32, 64, 96])
@@ -670,7 +1177,7 @@ class ExperimentRunner:
             self.config.project.artifact_dir
             / "experiments"
             / dataset.asset.value
-            / DataArm.MARKET.value
+            / self.config.training.frozen_core_arm
             / family.value
             / "best_params.json"
         )
@@ -691,14 +1198,18 @@ class ExperimentRunner:
     ) -> dict[str, Any]:
         if params_override is not None:
             return params_override
-        if dataset.arm != DataArm.MARKET:
+        configured_core = self.config.training.frozen_core_arm
+        if (
+            arm_id(dataset.arm) != DataArm.MARKET.value
+            and arm_id(dataset.arm) != configured_core
+        ):
             return self._load_frozen_market_params(dataset, family)
         params = self.search(dataset, family, folds, trials=trials)
         params_path = (
             self.config.project.artifact_dir
             / "experiments"
             / dataset.asset.value
-            / dataset.arm.value
+            / arm_id(dataset.arm)
             / family.value
             / "best_params.json"
         )
@@ -715,6 +1226,8 @@ class ExperimentRunner:
     ) -> list[WalkForwardFold]:
         holdout_start = pd.Timestamp(self.config.training.holdout_start)
         holdout_end = pd.Timestamp(self.config.training.holdout_end)
+        segment_ids = frame.get("continuity_segment_id")
+        minimum_coverage = 0.95 if self.config.training.protocol_version == "v2" else 0.0
         if phase == "development":
             folds = walk_forward_folds(
                 frame["as_of"],
@@ -723,6 +1236,8 @@ class ExperimentRunner:
                 test_months=self.config.training.test_months,
                 purge_hours=self.config.training.purge_hours,
                 test_end=holdout_start - pd.Timedelta(seconds=1),
+                segment_ids=segment_ids,
+                minimum_coverage=minimum_coverage,
             )
         else:
             folds = walk_forward_folds(
@@ -733,12 +1248,23 @@ class ExperimentRunner:
                 purge_hours=self.config.training.purge_hours,
                 test_start=holdout_start,
                 test_end=holdout_end,
+                segment_ids=segment_ids,
+                minimum_coverage=minimum_coverage,
             )
         if max_folds:
             folds = folds[-max_folds:]
         if not folds:
             label = "pre-holdout" if phase == "development" else "holdout"
             raise ValueError(f"dataset does not contain enough {label} history")
+        if phase == "development" and self.config.training.protocol_version == "v2":
+            minimum = max(
+                self.config.training.minimum_pre_holdout_folds,
+                self.config.gates.minimum_pre_holdout_folds,
+            )
+            if len(folds) < minimum:
+                raise ValueError(
+                    f"only {len(folds)} valid pre-holdout folds available; V2 requires {minimum}"
+                )
         return folds
 
     def _verify_selection(
@@ -757,7 +1283,7 @@ class ExperimentRunner:
             raise ValueError(f"selection lock has no frozen role: {selection_role}")
         if (
             ModelFamily(selected["family"]) != family
-            or DataArm(selected["data_arm"]) != dataset.arm
+            or str(selected["data_arm"]) != arm_id(dataset.arm)
         ):
             raise ValueError("family/data arm differs from the frozen selection")
         if selected["data_version"] != dataset.data_version:
@@ -788,8 +1314,12 @@ class ExperimentRunner:
         selection_lock: SelectionLock | None = None,
         selection_role: str = "champion",
     ) -> ExperimentResult:
-        if family not in {ModelFamily.RANDOM_FOREST, ModelFamily.TRANSFORMER}:
-            raise ValueError("the primary experiment supports RF or Transformer")
+        if family not in {
+            ModelFamily.RANDOM_FOREST,
+            ModelFamily.HIST_GRADIENT_BOOSTING,
+            ModelFamily.TRANSFORMER,
+        }:
+            raise ValueError("the primary experiment supports RF, HistGradientBoosting or Transformer")
         dataset = self._normalized_dataset(dataset)
         evaluation_seeds = seeds or self.config.training.seeds
         requested_trials = trials or self.config.training.max_trials
@@ -911,10 +1441,126 @@ class ExperimentRunner:
                 )
             )
         median_fold_sortino = float(median(item.normal.metrics.sortino for item in evaluated))
+        median_fold_stress_sortino = float(
+            median(item.stress.metrics.sortino for item in evaluated)
+        )
+        selected_probability_threshold = float(
+            median(item.probability_threshold for item in evaluated)
+        )
+        selected_cost_margin_bps = float(median(item.cost_margin_bps for item in evaluated))
+        seed_passes = sum(
+            float(metrics.get("total_return", -1.0)) >= 0.0
+            and float(metrics.get("max_drawdown", 1.0)) <= self.config.gates.max_drawdown
+            for metrics in seed_metrics.values()
+        )
+        first_seed_trades = pd.concat(
+            [item.normal.trades for item in evaluated_by_seed[evaluation_seeds[0]]],
+            ignore_index=True,
+        )
+        if first_seed_trades.empty:
+            activity_gate: dict[str, float | int | bool] = {
+                "average_monthly_trades": 0.0,
+                "minimum_monthly_trades": 0,
+                "months": 0,
+                "passed": False,
+            }
+        else:
+            exit_times = pd.to_datetime(first_seed_trades["exit_time"], utc=True)
+            monthly_counts = exit_times.dt.to_period("M").value_counts()
+            first_seed_timeline = pd.concat(
+                [item.normal.timeline for item in evaluated_by_seed[evaluation_seeds[0]]],
+                ignore_index=True,
+            )
+            timeline_start = pd.Timestamp(first_seed_timeline["as_of"].min())
+            timeline_end = pd.Timestamp(first_seed_timeline["as_of"].max())
+            timeline_start = (
+                timeline_start.tz_localize("UTC")
+                if timeline_start.tzinfo is None
+                else timeline_start.tz_convert("UTC")
+            )
+            timeline_end = (
+                timeline_end.tz_localize("UTC")
+                if timeline_end.tzinfo is None
+                else timeline_end.tz_convert("UTC")
+            )
+            complete_months = pd.period_range(
+                start=timeline_start.to_period("M"),
+                end=timeline_end.to_period("M"),
+                freq="M",
+            )
+            monthly_counts = monthly_counts.reindex(complete_months, fill_value=0)
+            activity_gate = {
+                "average_monthly_trades": float(monthly_counts.mean()),
+                "minimum_monthly_trades": int(monthly_counts.min()),
+                "months": int(len(monthly_counts)),
+                "passed": bool(
+                    len(monthly_counts) > 0
+                    and float(monthly_counts.mean())
+                    >= self.config.backtest.minimum_average_monthly_trades
+                    and int(monthly_counts.min())
+                    >= self.config.backtest.minimum_monthly_trades
+                ),
+            }
+        statistical_metrics: dict[str, float | bool] = {}
+        if self.config.training.protocol_version == "v2":
+            strategy_matrix = np.asarray(
+                [
+                    [float(item.normal.metrics.total_return) for item in evaluated_by_seed[seed]]
+                    for seed in evaluation_seeds
+                ],
+                dtype=float,
+            )
+            daily_series: list[pd.Series] = []
+            for items in evaluated_by_seed.values():
+                timeline = pd.concat([item.normal.timeline for item in items], ignore_index=True)
+                timeline["as_of"] = pd.to_datetime(timeline["as_of"], utc=True)
+                hourly = pd.Series(
+                    timeline["strategy_return"].to_numpy(dtype=float),
+                    index=timeline["as_of"],
+                )
+                daily_series.append((1.0 + hourly).resample("1D").prod() - 1.0)
+            min_days = min((len(series) for series in daily_series), default=0)
+            returns = (
+                np.concatenate([series.iloc[:min_days].to_numpy() for series in daily_series])
+                if min_days
+                else np.array([], dtype=float)
+            )
+            statistical_metrics = v2_statistical_gates(
+                returns,
+                strategy_matrix,
+                trials=max(requested_trials, 1),
+                max_pbo=self.config.gates.maximum_pbo,
+                min_dsr_probability=self.config.gates.minimum_dsr_probability,
+            )
+            statistical_metrics.update(
+                {
+                    "seed_pass_count": float(seed_passes),
+                    "seed_stability_passed": bool(
+                        seed_passes >= self.config.gates.minimum_seed_passes
+                        and all(
+                            float(metrics.get("max_drawdown", 1.0))
+                            <= self.config.gates.max_drawdown
+                            for metrics in seed_metrics.values()
+                        )
+                    ),
+                    "activity_average_monthly_trades": float(
+                        activity_gate["average_monthly_trades"]
+                    ),
+                    "activity_minimum_monthly_trades": float(
+                        activity_gate["minimum_monthly_trades"]
+                    ),
+                    "activity_gate_passed": bool(activity_gate["passed"]),
+                }
+            )
 
         full_protocol_seeds = evaluation_seeds == self.config.training.seeds
         if phase == "development":
-            market_search_complete = dataset.arm != DataArm.MARKET or (
+            search_arm = (
+                DataArm.MARKET.value
+                if self.config.training.protocol_version != "v2"
+                else self.config.training.frozen_core_arm
+            )
+            market_search_complete = arm_id(dataset.arm) != search_arm or (
                 params_override is None and requested_trials >= self.config.training.max_trials
             )
             protocol_eligible = (
@@ -923,6 +1569,14 @@ class ExperimentRunner:
                 and params_override is None
                 and market_search_complete
                 and clean_source
+                and (
+                    self.config.training.protocol_version != "v2"
+                    or (
+                        bool(statistical_metrics.get("passed", False))
+                        and bool(statistical_metrics.get("seed_stability_passed", False))
+                        and bool(statistical_metrics.get("activity_gate_passed", False))
+                    )
+                )
             )
             selection_metrics = aggregate
             selection_stress_metrics = aggregate_stress
@@ -935,6 +1589,14 @@ class ExperimentRunner:
                 and max_search_folds is None
                 and selection_lock is not None
                 and clean_source
+                and (
+                    self.config.training.protocol_version != "v2"
+                    or (
+                        bool(statistical_metrics.get("passed", False))
+                        and bool(statistical_metrics.get("seed_stability_passed", False))
+                        and bool(statistical_metrics.get("activity_gate_passed", False))
+                    )
+                )
             )
             selection_metrics = dict(selected_record.get("selection_metrics", {}))
             selection_stress_metrics = dict(selected_record.get("selection_stress_metrics", {}))
@@ -947,21 +1609,21 @@ class ExperimentRunner:
             phase,
             dataset.asset.value,
             family.value,
-            dataset.arm.value,
+            arm_id(dataset.arm),
             dataset.data_version,
             params,
             created_at.isoformat(),
             length=16,
         )
         version = (
-            f"{dataset.asset.value.lower()}-{family.value}-{dataset.arm.value}-{phase}-"
+            f"{dataset.asset.value.lower()}-{family.value}-{arm_id(dataset.arm)}-{phase}-"
             f"{created_at.strftime('%Y%m%dT%H%M%SZ')}-{dataset.data_version[:8]}-{run_id[:6]}"
         )
         run_directory = (
             self.config.project.artifact_dir
             / "experiments"
             / dataset.asset.value
-            / dataset.arm.value
+            / arm_id(dataset.arm)
             / family.value
             / run_id
         )
@@ -985,11 +1647,11 @@ class ExperimentRunner:
         if not len(final_indices):
             raise ValueError("no samples available for the final frozen fit window")
         deploy_seed = evaluation_seeds[0]
-        final_model = self._model(
+        final_model = self._final_model(
             family,
             params,
             n_features=x.shape[1],
-            seed=deploy_seed,
+            seeds=evaluation_seeds,
             feature_names=dataset.feature_columns,
         )
         tracemalloc.start()
@@ -998,6 +1660,63 @@ class ExperimentRunner:
         fit_seconds = time.perf_counter() - fit_started
         _, peak_python_bytes = tracemalloc.get_traced_memory()
         tracemalloc.stop()
+
+        # Keep the default model.onnx compatible with the V1 runtime while
+        # emitting the additive V2 regression/classification heads.  Registry
+        # registration hashes every sidecar, and runtime promotion refuses a
+        # missing or altered member.
+        horizon_sidecar: dict[str, tuple[str, str]] = {}
+        multitask_artifact = ""
+        if (
+            self.config.training.protocol_version == "v2"
+            and family
+            in {ModelFamily.RANDOM_FOREST, ModelFamily.HIST_GRADIENT_BOOSTING}
+        ):
+            multi_horizon_model = MultiHorizonTabularModel(
+                family=family,
+                params=params,
+                horizons=tuple(self.config.features.forecast_horizons),
+                seed=deploy_seed,
+                seeds=evaluation_seeds,
+            )
+            multi_horizon_model.fit(x, dataset.frame, final_indices)
+            horizon_sidecar = multi_horizon_model.export_onnx(bundle_directory)
+        elif (
+            self.config.training.protocol_version == "v2"
+            and family == ModelFamily.TRANSFORMER
+        ):
+            multitask_model = TransformerMultiHorizonModel(
+                n_features=x.shape[1],
+                sequence_length=self.config.features.lookback_hours,
+                horizons=tuple(self.config.features.forecast_horizons),
+                params=params,
+                seed=deploy_seed,
+                calendar_hour_index=(
+                    dataset.feature_columns.index("calendar_hour_index")
+                    if "calendar_hour_index" in dataset.feature_columns
+                    else None
+                ),
+                calendar_day_index=(
+                    dataset.feature_columns.index("calendar_day_index")
+                    if "calendar_day_index" in dataset.feature_columns
+                    else None
+                ),
+            )
+            regression_targets = np.column_stack(
+                [
+                    dataset.frame[f"target_normalized_return_{horizon}h"]
+                    for horizon in self.config.features.forecast_horizons
+                ]
+            ).astype(float)
+            classification_targets = np.column_stack(
+                [
+                    dataset.frame[f"label_tradeable_{horizon}h"]
+                    for horizon in self.config.features.forecast_horizons
+                ]
+            ).astype(float)
+            multitask_model.fit(x, regression_targets, classification_targets, final_indices)
+            multitask_artifact = "multihorizon_transformer.onnx"
+            multitask_model.export_onnx(bundle_directory / multitask_artifact)
 
         onnx_path = bundle_directory / "model.onnx"
         export_started = time.perf_counter()
@@ -1058,11 +1777,26 @@ class ExperimentRunner:
             version=version,
             asset=dataset.asset,
             family=family,
-            data_arm=dataset.arm,
+            data_arm=arm_id(dataset.arm),
             stage=RunStage.DEVELOPMENT,
             trained_at=created_at,
             training_end=pd.Timestamp(fit_end).to_pydatetime(),
             horizon_hours=self.config.features.horizon_hours,
+            forecast_horizons=(
+                list(self.config.features.forecast_horizons)
+                if self.config.training.protocol_version == "v2"
+                else [self.config.features.horizon_hours]
+            ),
+            ensemble_seeds=list(evaluation_seeds),
+            ensemble_id=deterministic_id(
+                "ensemble",
+                dataset.asset.value,
+                family.value,
+                arm_id(dataset.arm),
+                params,
+                evaluation_seeds,
+                length=20,
+            ),
             sequence_length=(
                 self.config.features.lookback_hours if family == ModelFamily.TRANSFORMER else 1
             ),
@@ -1082,6 +1816,20 @@ class ExperimentRunner:
             stress_metrics=holdout_stress_metrics,
             benchmark_metrics=benchmark_metrics,
             predictive_metrics=predictive.to_dict(),
+            statistical_metrics=statistical_metrics,
+            horizon_artifacts={
+                str(horizon): {
+                    "regression": files[0],
+                    "classification": files[1],
+                }
+                for horizon, files in horizon_sidecar.items()
+            },
+            multitask_artifact=multitask_artifact,
+            policy_version=(
+                "v2-cost-aware" if self.config.training.protocol_version == "v2" else "v1"
+            ),
+            probability_threshold=selected_probability_threshold,
+            cost_margin_bps=selected_cost_margin_bps,
             regime_metrics=regimes,
             operational_metrics=operational_metrics,
             explainability_complete=explainability_complete,
@@ -1103,17 +1851,20 @@ class ExperimentRunner:
             "selection_role": selection_role if phase == "holdout" else "",
             "asset": dataset.asset.value,
             "family": family.value,
-            "arm": dataset.arm.value,
+            "arm": arm_id(dataset.arm),
             "data_version": dataset.data_version,
             "feature_schema_version": dataset.schema_version,
             "parameters": params,
-            "search_trials": requested_trials if dataset.arm == DataArm.MARKET else 0,
+            "search_trials": requested_trials if arm_id(dataset.arm) == DataArm.MARKET.value else 0,
             "seeds": evaluation_seeds,
             "seed_metrics": seed_metrics,
             "seed_stress_metrics": seed_stress_metrics,
             "seed_sortino_std": float(
                 np.std([float(item["sortino"]) for item in seed_metrics.values()], ddof=0)
             ),
+            "median_fold_sortino": median_fold_sortino,
+            "median_fold_stress_sortino": median_fold_stress_sortino,
+            "activity_gate": activity_gate,
             "fit_details": fit_details,
             "selection_metrics": selection_metrics,
             "selection_stress_metrics": selection_stress_metrics,
@@ -1121,11 +1872,13 @@ class ExperimentRunner:
             "stress_metrics": holdout_stress_metrics,
             "benchmark_metrics": benchmark_metrics,
             "predictive_metrics": predictive.to_dict(),
+            "statistical_metrics": statistical_metrics,
+            "ensemble_seeds": evaluation_seeds,
+            "ensemble_id": metadata.ensemble_id,
             "regime_metrics": regimes,
             "operational_metrics": operational_metrics,
             "explainability_complete": explainability_complete,
             "folds": [asdict(item) for item in fold_evaluations],
-            "median_fold_sortino": median_fold_sortino,
             "onnx_max_abs_error": max_error,
             "onnx_tolerance": tolerance,
             "dependencies": _dependency_versions(),
@@ -1142,7 +1895,7 @@ class ExperimentRunner:
             phase=phase,
             asset=dataset.asset.value,
             family=family.value,
-            arm=dataset.arm.value,
+            arm=arm_id(dataset.arm),
             parameters=params,
             selection_metrics=selection_metrics,
             holdout_metrics=holdout_metrics,
@@ -1154,6 +1907,7 @@ class ExperimentRunner:
             folds=fold_evaluations,
             bundle_path=bundle_directory,
             registry_path=registry_path,
+            statistical_metrics=statistical_metrics,
         )
 
     def refit(
@@ -1168,9 +1922,13 @@ class ExperimentRunner:
 
         if parent.stage != RunStage.PAPER:
             raise ValueError("monthly refit requires an active paper-stage parent")
-        if parent.asset != dataset.asset or parent.data_arm != dataset.arm:
+        if parent.asset != dataset.asset or str(parent.data_arm) != arm_id(dataset.arm):
             raise ValueError("refit dataset differs from the active model identity")
-        if parent.family not in {ModelFamily.RANDOM_FOREST, ModelFamily.TRANSFORMER}:
+        if parent.family not in {
+            ModelFamily.RANDOM_FOREST,
+            ModelFamily.HIST_GRADIENT_BOOSTING,
+            ModelFamily.TRANSFORMER,
+        }:
             raise ValueError("unsupported refit family")
         dataset = self._normalized_dataset(dataset)
         if list(dataset.feature_columns) != parent.feature_names:
@@ -1242,7 +2000,7 @@ class ExperimentRunner:
             length=16,
         )
         version = (
-            f"{dataset.asset.value.lower()}-{parent.family.value}-{dataset.arm.value}-refit-"
+            f"{dataset.asset.value.lower()}-{parent.family.value}-{arm_id(dataset.arm)}-refit-"
             f"{created_at.strftime('%Y%m%dT%H%M%SZ')}-{dataset.data_version[:8]}-{run_id[:6]}"
         )
         run_directory = (
@@ -1257,6 +2015,58 @@ class ExperimentRunner:
         fit_seconds = time.perf_counter() - fit_started
         _, peak_python_bytes = tracemalloc.get_traced_memory()
         tracemalloc.stop()
+        horizon_sidecar: dict[str, tuple[str, str]] = {}
+        multitask_artifact = ""
+        if (
+            self.config.training.protocol_version == "v2"
+            and parent.family
+            in {ModelFamily.RANDOM_FOREST, ModelFamily.HIST_GRADIENT_BOOSTING}
+        ):
+            multi_horizon_model = MultiHorizonTabularModel(
+                family=parent.family,
+                params=dict(parent.parameters),
+                horizons=tuple(self.config.features.forecast_horizons),
+                seed=seed,
+                seeds=list(parent.ensemble_seeds or [seed]),
+            )
+            multi_horizon_model.fit(x, dataset.frame, final_indices)
+            horizon_sidecar = multi_horizon_model.export_onnx(bundle_directory)
+        elif (
+            self.config.training.protocol_version == "v2"
+            and parent.family == ModelFamily.TRANSFORMER
+        ):
+            multitask_model = TransformerMultiHorizonModel(
+                n_features=x.shape[1],
+                sequence_length=self.config.features.lookback_hours,
+                horizons=tuple(self.config.features.forecast_horizons),
+                params=dict(parent.parameters),
+                seed=seed,
+                calendar_hour_index=(
+                    dataset.feature_columns.index("calendar_hour_index")
+                    if "calendar_hour_index" in dataset.feature_columns
+                    else None
+                ),
+                calendar_day_index=(
+                    dataset.feature_columns.index("calendar_day_index")
+                    if "calendar_day_index" in dataset.feature_columns
+                    else None
+                ),
+            )
+            regression_targets = np.column_stack(
+                [
+                    dataset.frame[f"target_normalized_return_{horizon}h"]
+                    for horizon in self.config.features.forecast_horizons
+                ]
+            ).astype(float)
+            classification_targets = np.column_stack(
+                [
+                    dataset.frame[f"label_tradeable_{horizon}h"]
+                    for horizon in self.config.features.forecast_horizons
+                ]
+            ).astype(float)
+            multitask_model.fit(x, regression_targets, classification_targets, final_indices)
+            multitask_artifact = "multihorizon_transformer.onnx"
+            multitask_model.export_onnx(bundle_directory / multitask_artifact)
         onnx_path = bundle_directory / "model.onnx"
         export_started = time.perf_counter()
         model.export_onnx(onnx_path)
@@ -1325,6 +2135,24 @@ class ExperimentRunner:
             trained_at=created_at,
             training_end=latest.to_pydatetime(),
             horizon_hours=parent.horizon_hours,
+            forecast_horizons=(
+                list(self.config.features.forecast_horizons)
+                if self.config.training.protocol_version == "v2"
+                else [parent.horizon_hours]
+            ),
+            ensemble_seeds=list(parent.ensemble_seeds or [seed]),
+            ensemble_id=parent.ensemble_id,
+            horizon_artifacts={
+                str(horizon): {
+                    "regression": files[0],
+                    "classification": files[1],
+                }
+                for horizon, files in horizon_sidecar.items()
+            },
+            multitask_artifact=multitask_artifact,
+            policy_version=parent.policy_version,
+            probability_threshold=parent.probability_threshold,
+            cost_margin_bps=parent.cost_margin_bps,
             sequence_length=parent.sequence_length,
             feature_names=parent.feature_names,
             feature_schema_version=parent.feature_schema_version,
@@ -1343,6 +2171,7 @@ class ExperimentRunner:
             stress_metrics=parent.stress_metrics,
             benchmark_metrics=parent.benchmark_metrics,
             predictive_metrics=parent.predictive_metrics,
+            statistical_metrics=parent.statistical_metrics,
             regime_metrics=parent.regime_metrics,
             operational_metrics=operational_metrics,
             explainability_complete=explainability_complete,
@@ -1362,7 +2191,7 @@ class ExperimentRunner:
             "asset": dataset.asset.value,
             "slot": slot,
             "family": parent.family.value,
-            "arm": dataset.arm.value,
+            "arm": arm_id(dataset.arm),
             "parent_version": parent.version,
             "selection_id": parent.selection_id,
             "data_version": dataset.data_version,
@@ -1390,7 +2219,7 @@ class ExperimentRunner:
             phase="refit",
             asset=dataset.asset.value,
             family=parent.family.value,
-            arm=dataset.arm.value,
+            arm=arm_id(dataset.arm),
             parameters=dict(parent.parameters),
             selection_metrics=dict(parent.selection_metrics),
             holdout_metrics=dict(parent.holdout_metrics),

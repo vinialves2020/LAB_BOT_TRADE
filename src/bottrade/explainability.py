@@ -69,9 +69,25 @@ def random_forest_shap(
     if pipeline is None or "regressor" not in pipeline.named_steps:
         raise TypeError("SHAP explanation requires a fitted sklearn pipeline")
     selected = np.asarray(indices[-min(max_samples, len(indices)) :], dtype=int)
-    transformed = pipeline.named_steps["imputer"].transform(x[selected])
-    explainer = shap.TreeExplainer(pipeline.named_steps["regressor"])
-    values = np.asarray(explainer.shap_values(transformed), dtype=float)
+    regressor = pipeline.named_steps["regressor"]
+    members = getattr(regressor, "estimators_", [])
+    if members and hasattr(members[0], "named_steps"):
+        values_per_member: list[np.ndarray] = []
+        for member in members:
+            member_pipeline = member
+            transformed = member_pipeline.named_steps["imputer"].transform(x[selected])
+            values_per_member.append(
+                np.asarray(
+                    shap.TreeExplainer(member_pipeline.named_steps["regressor"]).shap_values(
+                        transformed
+                    ),
+                    dtype=float,
+                )
+            )
+        values = np.mean(np.stack(values_per_member), axis=0)
+    else:
+        transformed = pipeline.named_steps["imputer"].transform(x[selected])
+        values = np.asarray(shap.TreeExplainer(regressor).shap_values(transformed), dtype=float)
     if values.ndim == 3:
         values = values[..., 0]
     return _ranked(feature_names, np.mean(np.abs(values), axis=0))

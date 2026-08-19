@@ -12,7 +12,7 @@ from bottrade.data.binance import BinanceClient
 from bottrade.data.http import PublicHttpClient
 from bottrade.data.pipeline import DataPipeline
 from bottrade.dataset import DatasetBuilder
-from bottrade.domain import Asset, DataArm, ModelFamily, RiskState, RunStage
+from bottrade.domain import Asset, DataArm, DataArmSpec, ModelFamily, RiskState, RunStage
 from bottrade.evaluation import FinalGateEvaluator
 from bottrade.jobs import JobRunner
 from bottrade.logging_utils import configure_logging
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 app = typer.Typer(
     name="bottrade",
-    help="Laboratório RF × Transformer e bot paper spot long/flat.",
+    help="Laboratório RF × Transformer × Gradient Boosting e bot paper spot long/flat.",
     no_args_is_help=True,
 )
 data_app = typer.Typer(help="Coleta e validação de fontes públicas.")
@@ -177,7 +177,11 @@ def _run_experiment(
         HyperparameterSearchRejectedError,
     )
 
-    bundle = DatasetBuilder(config).load(Asset(asset), DataArm(arm))
+    try:
+        arm_value: DataArm | DataArmSpec = DataArm(arm)
+    except ValueError:
+        arm_value = DataArmSpec.from_id(arm)
+    bundle = DatasetBuilder(config).load(Asset(asset), arm_value)
     try:
         result = ExperimentRunner(config).run(
             bundle,
@@ -240,7 +244,9 @@ def _run_experiment(
 @app.command("train")
 def train(
     asset: Annotated[str, typer.Option(help="BTCUSDT, ETHUSDT ou SOLUSDT.")],
-    family: Annotated[str, typer.Option(help="random_forest ou transformer.")],
+    family: Annotated[
+        str, typer.Option(help="random_forest, hist_gradient_boosting ou transformer.")
+    ],
     arm: Annotated[str, typer.Option(help="Braço de dados.")] = "market",
     trials: Annotated[int, typer.Option(min=1, max=30)] = 30,
     max_folds: Annotated[
@@ -264,7 +270,9 @@ def train(
 @app.command("backtest")
 def backtest(
     asset: Annotated[str, typer.Option(help="BTCUSDT, ETHUSDT ou SOLUSDT.")],
-    family: Annotated[str, typer.Option(help="random_forest ou transformer.")],
+    family: Annotated[
+        str, typer.Option(help="random_forest, hist_gradient_boosting ou transformer.")
+    ],
     arm: Annotated[str, typer.Option(help="Braço de dados.")] = "market",
     params: Annotated[Path | None, typer.Option(help="JSON de parâmetros congelados.")] = None,
     max_folds: Annotated[int | None, typer.Option()] = None,
@@ -288,6 +296,8 @@ def backtest(
             frozen = json.loads(candidate.read_text(encoding="utf-8"))
         elif family_enum == ModelFamily.RANDOM_FOREST:
             frozen = config.training.random_forest.model_dump()
+        elif family_enum == ModelFamily.HIST_GRADIENT_BOOSTING:
+            frozen = config.training.hist_gradient_boosting.model_dump()
         else:
             frozen = config.training.transformer.model_dump()
     _run_experiment(
@@ -337,7 +347,10 @@ def holdout(
     lock = manager.claim_holdout(asset_enum, role=role, resume=resume)
     selected = manager.role(lock, role)
     family = ModelFamily(selected["family"])
-    data_arm = DataArm(selected["data_arm"])
+    try:
+        data_arm: DataArm | DataArmSpec = DataArm(selected["data_arm"])
+    except ValueError:
+        data_arm = DataArmSpec.from_id(selected["data_arm"])
     bundle = DatasetBuilder(config).load(
         asset_enum,
         data_arm,

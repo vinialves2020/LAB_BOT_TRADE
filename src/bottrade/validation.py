@@ -19,6 +19,10 @@ class WalkForwardFold:
     calibration_end: pd.Timestamp
     test_start: pd.Timestamp
     test_end: pd.Timestamp
+    train_segments: tuple[str, ...] = ()
+    calibration_segments: tuple[str, ...] = ()
+    test_segments: tuple[str, ...] = ()
+    coverage: float = 1.0
 
 
 def _month_start(value: pd.Timestamp) -> pd.Timestamp:
@@ -35,10 +39,19 @@ def walk_forward_folds(
     purge_hours: int,
     test_start: pd.Timestamp | None = None,
     test_end: pd.Timestamp | None = None,
+    segment_ids: pd.Series | pd.Index | None = None,
+    minimum_coverage: float = 0.0,
 ) -> list[WalkForwardFold]:
     times = pd.DatetimeIndex(pd.to_datetime(timestamps, utc=True))
     if not times.is_monotonic_increasing:
         raise ValueError("timestamps must be sorted")
+    if not 0.0 <= minimum_coverage <= 1.0:
+        raise ValueError("minimum_coverage must be between zero and one")
+    segments: pd.Series | None = None
+    if segment_ids is not None:
+        segments = pd.Series(segment_ids, index=np.arange(len(times)), dtype="string")
+        if len(segments) != len(times):
+            raise ValueError("segment_ids must have the same length as timestamps")
     earliest = times.min()
     latest = times.max()
     first_possible = _month_start(earliest) + pd.DateOffset(
@@ -58,6 +71,18 @@ def walk_forward_folds(
         calibration_mask = (times >= calibration_start) & (times < calibration_end)
         test_mask = (times >= cursor) & (times < fold_test_end)
         if train_mask.any() and calibration_mask.any() and test_mask.any():
+            expected_hours = max(
+                int((fold_test_end - cursor).total_seconds() // 3600), 1
+            )
+            coverage = float(test_mask.sum()) / expected_hours
+            if coverage < minimum_coverage:
+                cursor = cursor + pd.DateOffset(months=test_months)
+                continue
+            def _segments(mask: np.ndarray) -> tuple[str, ...]:
+                if segments is None:
+                    return ()
+                return tuple(sorted(set(segments.iloc[np.flatnonzero(mask)].dropna().tolist())))
+
             folds.append(
                 WalkForwardFold(
                     name=cursor.strftime("%Y-%m"),
@@ -70,9 +95,61 @@ def walk_forward_folds(
                     calibration_end=pd.Timestamp(calibration_end),
                     test_start=cursor,
                     test_end=pd.Timestamp(fold_test_end),
+                    train_segments=_segments(train_mask),
+                    calibration_segments=_segments(calibration_mask),
+                    test_segments=_segments(test_mask),
+                    coverage=coverage,
                 )
             )
         cursor = cursor + pd.DateOffset(months=test_months)
+    return folds
+
+
+def continuity_segments(
+    timestamps: pd.Series | pd.DatetimeIndex,
+    *,
+    expected_frequency: str = "1h",
+) -> pd.Series:
+    """Return stable segment identifiers without filling missing observations."""
+
+    times = pd.Series(pd.to_datetime(timestamps, utc=True)).reset_index(drop=True)
+    if times.empty:
+        return pd.Series(dtype="string")
+    delta = times.diff().gt(pd.Timedelta(expected_frequency)).fillna(False)
+    segment_number = delta.cumsum().astype(int)
+    return segment_number.map(lambda value: f"segment-{int(value):04d}").astype("string")
+
+
+def valid_continuity_mask(
+    timestamps: pd.Series | pd.DatetimeIndex,
+    *,
+    lookback_hours: int,
+    max_horizon_hours: int,
+    expected_frequency: str = "1h",
+) -> pd.Series:
+    """Mark rows whose complete lookback and label windows remain in one segment."""
+
+    times = pd.Series(pd.to_datetime(timestamps, utc=True)).reset_index(drop=True)
+    segments = continuity_segments(times, expected_frequency=expected_frequency)
+    expected = pd.Timedelta(expected_frequency)
+    output = np.zeros(len(times), dtype=bool)
+    for index in range(len(times)):
+        start = index - lookback_hours + 1
+        end = index + max_horizon_hours + 1
+        if start < 0 or end > len(times):
+            continue
+        window = times.iloc[start:end]
+        if (window.diff().dropna() > expected).any():
+            continue
+        output[index] = segments.iloc[start] == segments.iloc[end - 1]
+    return pd.Series(output, index=getattr(timestamps, "index", None))
+
+
+def require_minimum_folds(folds: list[WalkForwardFold], minimum: int) -> list[WalkForwardFold]:
+    if minimum < 1:
+        raise ValueError("minimum fold count must be positive")
+    if len(folds) < minimum:
+        raise ValueError(f"only {len(folds)} valid folds available; need at least {minimum}")
     return folds
 
 

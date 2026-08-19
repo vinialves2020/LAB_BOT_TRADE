@@ -1,4 +1,4 @@
-# BOT_TRADE — RF × Transformer
+# BOT_TRADE — RF × Transformer × Gradient Boosting
 
 Laboratório reproduzível e bot de paper trading spot `long/flat` para `BTCUSDT`, `ETHUSDT` e `SOLUSDT`. O repositório implementa o protocolo experimental, o registro imutável de modelos e o caminho operacional 24/7. A primeira leva de treinamento foi encerrada como resultado negativo/inconclusivo e está documentada em [docs/RESULTS_FIRST_RUN.md](docs/RESULTS_FIRST_RUN.md); nenhum holdout, canário ou capital real foi ativado.
 
@@ -7,10 +7,19 @@ Laboratório reproduzível e bot de paper trading spot `long/flat` para `BTCUSDT
 ## Escopo implementado
 
 - Candles públicos Binance 1h, Coin Metrics para BTC/ETH, DefiLlama para Solana e Fear & Greed geral.
+- V2 adiciona candles 15m, segmentos gap-aware, labels cost-aware em 3h/6h/12h,
+  HistGradientBoosting challenger e braços composíveis com derivativos históricos.
 - `event_time`, `available_at`, atraso conservador de 24h, idade, ausência, staleness de 72h e fallback pré-selecionado `market`.
-- Quatro braços: `market`, `market_onchain`, `market_sentiment` e `market_all`.
+- V1 preserva quatro braços (`market`, `market_onchain`, `market_sentiment`,
+  `market_all`); V2 usa `DataArmSpec` para compor core 1h/15m, derivativos,
+  on-chain e sentimento.
 - Label de retorno do próximo `open` até o fechamento três horas adiante, normalizado pela EWMA truncada às 168 horas estritamente anteriores.
 - Random Forest, Transformer temporal com embeddings de calendário e controles cash, buy-and-hold com risco equivalente, médias móveis e Ridge.
+- V2 congela cinco seeds, ensemble tabular ONNX, calibração de probabilidade,
+  seleção de horizonte e diagnósticos DSR/PBO.
+- O resultado negativo/inconclusivo da V2 está congelado em
+  [docs/RESULTS_V2.md](docs/RESULTS_V2.md); a V3 será implementada em módulos
+  aditivos, sem abrir o holdout.
 - Walk-forward 24m/3m/1m, purge/embargo, cinco seeds independentes, custos-base/dobrados, análise por regime e explicabilidade.
 - Trava de seleção anterior ao holdout, holdout inacessível pelo fluxo de desenvolvimento, linhagem de refit e verificação ONNX.
 - Dois ledgers transacionais de 500/1.000 USDT, execução hipotética pelo livro, regras Binance, idempotência, reconciliação e circuit breakers.
@@ -57,31 +66,38 @@ Antes da primeira execução oficial, inicialize o controle de versão e faça u
 
 ## Fluxo experimental oficial
 
-1. Coletar e construir os quatro braços. O corte de desenvolvimento continua anterior a `2025-08-01`; o comando de treino nunca avalia o holdout.
+O fluxo V1 abaixo continua apenas para reprodução histórica. Toda nova rodada
+deve apontar explicitamente para `config/v2.yaml`; o holdout permanece fixo e
+intocável durante treino e ablações. A sequência detalhada está em
+[docs/PROTOCOL_V2.md](docs/PROTOCOL_V2.md).
 
-       bottrade data sync --start 2017-08-17 --end 2026-07-31T23:59:59Z
-       bottrade dataset build
+1. Coletar e construir os braços V2 (1h + 15m e, quando houver arquivo oficial,
+   derivativos). O corte de desenvolvimento continua anterior a `2025-08-01`;
+   o comando de treino nunca avalia o holdout.
 
-2. Para cada ativo, executar 30 trials no braço `market` de cada família. Em seguida, executar os outros três braços; eles carregam automaticamente os hiperparâmetros congelados de `market`. Toda execução oficial usa as cinco seeds configuradas.
+       bottrade data sync --config config/v2.yaml --start 2017-08-17 --end 2026-07-31T23:59:59Z
+       bottrade dataset build --config config/v2.yaml
 
-       bottrade train --asset BTCUSDT --family random_forest --arm market --trials 30
-       bottrade train --asset BTCUSDT --family transformer --arm market --trials 30
-       bottrade train --asset BTCUSDT --family random_forest --arm market_onchain
-       bottrade train --asset BTCUSDT --family random_forest --arm market_sentiment
-       bottrade train --asset BTCUSDT --family random_forest --arm market_all
-       bottrade train --asset BTCUSDT --family transformer --arm market_onchain
-       bottrade train --asset BTCUSDT --family transformer --arm market_sentiment
-       bottrade train --asset BTCUSDT --family transformer --arm market_all
+2. Para cada ativo, executar no máximo 20 trials no core V2 de cada família.
+   Depois de congelar o core em `training.frozen_core_arm`, as ablações carregam
+   os mesmos hiperparâmetros e usam as cinco seeds configuradas.
 
-3. Somente quando os oito candidatos elegíveis existirem, congelar campeão, fallback e challenger. O arquivo de seleção é imutável e guarda checksums.
+       bottrade train --config config/v2.yaml --asset BTCUSDT --family random_forest --arm market_1h_15m --trials 20
+       bottrade train --config config/v2.yaml --asset BTCUSDT --family hist_gradient_boosting --arm market_1h_15m --trials 20
+       bottrade train --config config/v2.yaml --asset BTCUSDT --family transformer --arm market_1h_15m --trials 20
+       bottrade train --config config/v2.yaml --asset BTCUSDT --family random_forest --arm market_1h_15m_derivatives
 
-       bottrade models select --asset BTCUSDT
+3. Somente quando a matriz V2 completa de famílias × braços existir, congelar
+   campeão, fallback e challenger. O arquivo de seleção é imutável e guarda
+   checksums.
+
+       bottrade models select --config config/v2.yaml --asset BTCUSDT
 
 4. Abrir o holdout uma única vez para cada `run_id` distinto indicado pela seleção. Se duas funções apontarem para o mesmo candidato, uma única avaliação satisfaz ambas. `--resume` só recupera a mesma execução após falha operacional.
 
-       bottrade holdout --asset BTCUSDT --role champion
-       bottrade holdout --asset BTCUSDT --role market_fallback
-       bottrade holdout --asset BTCUSDT --role challenger
+       bottrade holdout --config config/v2.yaml --asset BTCUSDT --role champion
+       bottrade holdout --config config/v2.yaml --asset BTCUSDT --role market_fallback
+       bottrade holdout --config config/v2.yaml --asset BTCUSDT --role challenger
 
 5. Repetir para ETH e SOL. Um candidato que falhar no holdout não pode ser promovido e o respectivo ativo/slot fica em caixa.
 
@@ -134,6 +150,7 @@ O dashboard fica em `http://localhost:8501`. O compose não agenda jobs automati
 ## Documentação
 
 - [Protocolo pré-registrado](docs/PROTOCOL.md)
+- [Protocolo V2](docs/PROTOCOL_V2.md)
 - [Fontes e dicionário de dados](docs/DATA.md)
 - [Operação, canário e recuperação](docs/OPERATIONS.md)
 - [Segurança e limites](docs/SECURITY.md)

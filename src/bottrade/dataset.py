@@ -13,20 +13,29 @@ from bottrade.config import AppConfig
 from bottrade.data.binance import validate_hourly_continuity
 from bottrade.data.manifest import DatasetManifest, read_manifest
 from bottrade.data.pipeline import DataPipeline
-from bottrade.domain import Asset, DataArm
+from bottrade.domain import Asset, DataArm, DataArmSpec
 from bottrade.features import FEATURE_SCHEMA_VERSION, FeatureBuilder
 from bottrade.utils import content_hash, sha256_file
+
+
+def arm_id(value: DataArm | DataArmSpec | str) -> str:
+    if isinstance(value, DataArm):
+        return value.value
+    if isinstance(value, DataArmSpec):
+        return value.arm_id
+    return str(value)
 
 
 @dataclass(frozen=True, slots=True)
 class DatasetBundle:
     asset: Asset
-    arm: DataArm
+    arm: DataArm | DataArmSpec
     frame: pd.DataFrame
     feature_columns: tuple[str, ...]
     data_version: str
     schema_version: str
     path: Path
+    arm_spec: DataArmSpec | None = None
 
 
 class DatasetBuilder:
@@ -66,6 +75,29 @@ class DatasetBuilder:
             gaps_by_symbol[symbol] = gaps
             all_gaps.update(gaps)
 
+        if self.config.features.historical_gap_policy == "gap_aware_segments":
+            retained = {
+                symbol: frame.loc[
+                    (pd.to_datetime(frame["open_time"], utc=True) >= common_start)
+                    & (pd.to_datetime(frame["open_time"], utc=True) <= common_end)
+                ].sort_values("open_time").reset_index(drop=True)
+                for symbol, frame in market.items()
+            }
+            metadata = {
+                "historical_gap_policy": "gap_aware_segments",
+                "common_market_start": common_start.isoformat(),
+                "common_market_end": common_end.isoformat(),
+                "continuous_market_start": common_start.isoformat(),
+                "excluded_gap_count": len(all_gaps),
+                "excluded_gaps": [value.isoformat() for value in sorted(all_gaps)],
+                "gaps_by_symbol": {
+                    symbol: [value.isoformat() for value in values]
+                    for symbol, values in gaps_by_symbol.items()
+                },
+                "gap_aware_segments": True,
+            }
+            return retained, metadata
+
         continuous_start = max(all_gaps) + pd.Timedelta(hours=1) if all_gaps else common_start
         trimmed: dict[str, pd.DataFrame] = {}
         for symbol, frame in market.items():
@@ -99,12 +131,18 @@ class DatasetBuilder:
         selected_assets = assets or list(Asset)
         market, history_metadata = self._continuous_market_history(self.pipeline.load_market())
         onchain, sentiment = self.pipeline.load_alternatives()
+        intrahour = self.pipeline.load_intrahour()
+        derivatives = self.pipeline.load_derivatives()
         raw_manifest_path = self.manifest_dir / "latest.json"
         raw_manifest = read_manifest(raw_manifest_path) if raw_manifest_path.exists() else {}
         bundles: list[DatasetBundle] = []
         output_manifest = DatasetManifest(
             dataset="bottrade-feature-datasets",
-            schema_version=FEATURE_SCHEMA_VERSION,
+            schema_version=(
+                "features-v4"
+                if self.config.features.historical_gap_policy == "gap_aware_segments"
+                else FEATURE_SCHEMA_VERSION
+            ),
             metadata={
                 "raw_data_version": raw_manifest.get("data_version", "unknown"),
                 **history_metadata,
@@ -112,7 +150,11 @@ class DatasetBuilder:
         )
         for asset in selected_assets:
             for arm_name in self.config.features.arms:
-                arm = DataArm(arm_name)
+                try:
+                    arm: DataArm | DataArmSpec = DataArm(arm_name)
+                except ValueError:
+                    arm = DataArmSpec.from_id(arm_name)
+                arm_spec = DataArmSpec.from_id(arm)
                 featured = self.feature_builder.build(
                     asset=asset,
                     market=market,
@@ -120,15 +162,19 @@ class DatasetBuilder:
                     sentiment=sentiment,
                     arm=arm,
                     include_labels=True,
+                    intrahour=intrahour,
+                    derivatives=derivatives,
                 )
                 directory = self.output_dir / asset.value
                 directory.mkdir(parents=True, exist_ok=True)
-                path = directory / f"{arm.value}.parquet"
+                arm_id = arm.value if isinstance(arm, DataArm) else arm.arm_id
+                path = directory / f"{arm_id}.parquet"
                 featured.frame.to_parquet(path, index=False)
                 schema_core = {
                     "schema_version": featured.schema_version,
                     "asset": asset.value,
-                    "arm": arm.value,
+                    "arm": arm_id,
+                    "arm_components": list(arm_spec.components),
                     "feature_columns": list(featured.feature_columns),
                     "dtypes": {
                         column: str(featured.frame[column].dtype) for column in featured.frame
@@ -149,23 +195,23 @@ class DatasetBuilder:
                     "parquet_sha256": parquet_sha256,
                     "raw_data_version": raw_manifest.get("data_version", "unknown"),
                 }
-                schema_path = directory / f"{arm.value}.schema.json"
+                schema_path = directory / f"{arm_id}.schema.json"
                 schema_path.write_text(
                     json.dumps(schema, indent=2, sort_keys=True), encoding="utf-8"
                 )
                 version_directory = directory / "versions" / data_version
                 version_directory.mkdir(parents=True, exist_ok=True)
-                versioned_path = version_directory / f"{arm.value}.parquet"
-                versioned_schema_path = version_directory / f"{arm.value}.schema.json"
+                versioned_path = version_directory / f"{arm_id}.parquet"
+                versioned_schema_path = version_directory / f"{arm_id}.schema.json"
                 if not versioned_path.exists():
                     shutil.copy2(path, versioned_path)
                 if sha256_file(versioned_path) != parquet_sha256:
-                    raise ValueError(f"immutable dataset collision for {asset.value}/{arm.value}")
+                    raise ValueError(f"immutable dataset collision for {asset.value}/{arm_id}")
                 versioned_schema_path.write_text(
                     json.dumps(schema, indent=2, sort_keys=True), encoding="utf-8"
                 )
                 output_manifest.add_file(
-                    source=f"features_{asset.value}_{arm.value}",
+                    source=f"features_{asset.value}_{arm_id}",
                     url="local-feature-pipeline",
                     path=versioned_path,
                     rows=len(featured.frame),
@@ -182,6 +228,7 @@ class DatasetBuilder:
                         data_version=data_version,
                         schema_version=featured.schema_version,
                         path=versioned_path,
+                        arm_spec=arm_spec,
                     )
                 )
         output_manifest.write(self.manifest_dir / "features-latest.json")
@@ -190,17 +237,19 @@ class DatasetBuilder:
     def load(
         self,
         asset: Asset,
-        arm: DataArm,
+        arm: DataArm | DataArmSpec | str,
         *,
         data_version: str | None = None,
     ) -> DatasetBundle:
+        arm_spec = DataArmSpec.from_id(arm)
+        arm_id = arm.value if isinstance(arm, DataArm) else arm.arm_id if isinstance(arm, DataArmSpec) else str(arm)
         directory = self.output_dir / asset.value
         if data_version:
             if re.fullmatch(r"[0-9a-f]{20}", data_version) is None:
                 raise ValueError(f"invalid processed dataset version: {data_version!r}")
             directory = directory / "versions" / data_version
-        path = directory / f"{arm.value}.parquet"
-        schema_path = directory / f"{arm.value}.schema.json"
+        path = directory / f"{arm_id}.parquet"
+        schema_path = directory / f"{arm_id}.schema.json"
         if not path.exists() or not schema_path.exists():
             raise FileNotFoundError(
                 f"processed dataset missing for {asset}/{arm}; run 'bottrade dataset build'"
@@ -216,6 +265,7 @@ class DatasetBuilder:
                 "schema_version",
                 "asset",
                 "arm",
+                "arm_components",
                 "feature_columns",
                 "dtypes",
                 "market_history",
@@ -232,7 +282,7 @@ class DatasetBuilder:
             raise ValueError(f"processed dataset version mismatch: {path}")
         frame = pd.read_parquet(path)
         frame["as_of"] = pd.to_datetime(frame["as_of"], utc=True)
-        if schema.get("asset") != asset.value or schema.get("arm") != arm.value:
+        if schema.get("asset") != asset.value or schema.get("arm") != arm_id:
             raise ValueError(f"processed dataset identity mismatch: {path}")
         missing_features = set(schema["feature_columns"]) - set(frame.columns)
         if missing_features:
@@ -247,4 +297,5 @@ class DatasetBuilder:
             data_version=stored_version,
             schema_version=schema["schema_version"],
             path=path,
+            arm_spec=arm_spec,
         )

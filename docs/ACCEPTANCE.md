@@ -4,20 +4,31 @@
 
 - Lint e testes unitários/integrados locais passam.
 - Manifests têm URL, período, schema e SHA-256 válidos.
-- Nenhum candle futuro/incompleto e nenhum gap tratado como preço verdadeiro.
+- Nenhum candle futuro/incompleto e nenhum gap tratado como preço verdadeiro;
+  V2 mantém `continuity_segment_id` e rejeita amostras que cruzem segmento.
+- Timestamps Binance em ms e µs, candles 15m sem look-ahead e purge/embargo
+  de 12h cobertos por testes.
 - Joins alternativos respeitam `available_at`; teste temporal prova ausência de forward fill futuro.
 - Split walk-forward confirma purge/embargo e scalers treinados somente no passado.
 - Mesma seed reproduz previsões dentro da tolerância numérica.
 
 ## Gates de candidato
 
-- Oito candidatos oficiais por ativo: duas famílias × quatro braços.
-- Braço `market` com 30 trials e ablações com parâmetros herdados.
+- V2 registra três famílias (RF, HistGradientBoosting e Transformer) e a matriz
+  composível de braços descrita em `docs/PROTOCOL_V2.md`.
+- Braço `market_1h` com no máximo 20 trials e ablações com parâmetros herdados.
+- Labels de 3h/6h/12h, classificação cost-aware, calibração cronológica e
+  seleção de horizonte sem usar previsões in-sample.
 - Cinco seeds independentes, métricas medianas e dispersão registradas.
 - Custos, thresholds, giro e trades mínimos aplicados na calibração.
 - Permutation importance para ambos; SHAP ou IG/ablação conforme família.
 - `experiment.json`, model card e hashes completos.
-- ONNX com erro absoluto máximo `1e-4` contra o modelo nativo.
+- ONNX com erro absoluto máximo `1e-4` contra o modelo nativo; sidecars de
+  classificação/regressão e ensemble também precisam ser verificados.
+- DSR ≥ 0,95, PBO ≤ 20%, quatro de cinco seeds com retorno não negativo e
+  nenhuma com drawdown acima de 8%.
+- Frequência mínima de 20 trades/mês em média, 10 em cada mês completo e 60
+  na calibração, sem exceder duas entradas/saídas completas por dia.
 - Seleção imutável criada antes de abrir o holdout.
 
 ## Golden replay e falhas
@@ -50,7 +61,8 @@ O avaliador exige simultaneamente no holdout e nos dois ledgers do paper oficial
 - Sharpe diário anualizado ≥ 1,0.
 - Drawdown máximo ≤ 8%.
 - Profit factor ≥ 1,2.
-- Pelo menos 100 trades fechados.
+- V2: pelo menos 240 trades fechados no holdout e 120 no paper oficial, com
+  média de 20/mês e piso de 10/mês.
 - Resultado líquido positivo sob o replay de custos dobrados.
 - Desempenho ajustado a risco superior aos controles.
 - Nenhum ledger atingiu daily stop, position stop ou circuit breaker.

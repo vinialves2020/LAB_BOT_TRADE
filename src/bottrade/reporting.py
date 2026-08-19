@@ -65,14 +65,14 @@ class ReportGenerator:
         path.parent.mkdir(parents=True, exist_ok=True)
         experiments = self.experiment_records()
         lines = [
-            "# Relatório técnico — RF × Transformer",
+            "# Relatório técnico — V2 RF × Transformer × Gradient Boosting",
             "",
             f"Gerado em: {utc_now().isoformat()}",
             "",
             "## Protocolo",
             "",
             "- Mercado spot long/flat: BTCUSDT, ETHUSDT e SOLUSDT.",
-            "- Candle de 1h e horizonte de previsão de 3h.",
+            "- Decisão horária; features intrahorárias opcionais de 15m; horizontes de 3h, 6h e 12h.",
             "- Holdout congelado: 2025-08-01 a 2026-07-31 UTC.",
             "- Custos-base: 24 bps por round trip; estresse: 48 bps.",
             "",
@@ -188,6 +188,7 @@ class ReportGenerator:
                     "| Família | Forças | Fraquezas |",
                     "|---|---|---|",
                     "| Random Forest | Treino/inferência simples; robusto em amostras tabulares; SHAP direto; baixo custo operacional. | Depende mais de lags/estatísticas desenhados; extrapola mal; representação temporal menos natural. |",
+                    "| HistGradientBoosting | Challenger tabular eficiente; captura relações não lineares; exportação ONNX; treinamento mais rápido que RF em muitas linhas. | Mais sensível a hiperparâmetros; não modela sequência diretamente; incerteza precisa ser calibrada. |",
                     "| Transformer | Janela temporal conjunta de 168h; embeddings de calendário; interações sequenciais. | Mais dados, memória e tempo; maior variância entre seeds; explicação e depuração mais difíceis. |",
                     "",
                     "Atenção é apenas diagnóstico qualitativo, nunca explicação causal.",
@@ -254,6 +255,8 @@ def write_model_card(metadata: dict[str, Any], output: Path) -> Path:
     predictive = metadata.get("predictive_metrics", {})
     operational = metadata.get("operational_metrics", {})
     source_control = metadata.get("source_control", {})
+    horizons = metadata.get("forecast_horizons") or [metadata.get("horizon_hours")]
+    horizon_text = ", ".join(f"{int(value)}h" for value in horizons if value is not None)
     metric_heading = (
         "Holdout congelado"
         if metadata.get("protocol_phase") == "holdout"
@@ -269,7 +272,9 @@ def write_model_card(metadata: dict[str, Any], output: Path) -> Path:
         f"- Fase do protocolo: {metadata.get('protocol_phase')}",
         f"- Seleção pré-holdout: {metadata.get('selection_id') or 'ainda não congelada'}",
         f"- Papel congelado: {metadata.get('selection_role') or 'candidato'}",
-        f"- Horizonte: {metadata.get('horizon_hours')}h",
+        f"- Horizontes: {horizon_text}",
+        f"- Política: {metadata.get('policy_version', 'v1')} (p≥{float(metadata.get('probability_threshold', 0.5)):.2f}, margem {float(metadata.get('cost_margin_bps', 0)):.0f} bps)",
+        f"- Ensemble: {metadata.get('ensemble_id') or 'não aplicável'}; seeds={metadata.get('ensemble_seeds') or [metadata.get('seed')]}",
         f"- ONNX verificado: {metadata.get('onnx_verified')}",
         f"- Erro máximo ONNX: {float(metadata.get('onnx_max_abs_error', 0)):.8f}",
         f"- Explicabilidade completa: {metadata.get('explainability_complete')}",

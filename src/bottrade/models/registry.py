@@ -11,7 +11,14 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from bottrade.config import AppConfig
-from bottrade.domain import Asset, DataArm, ModelFamily, RunStage
+from bottrade.domain import (
+    Asset,
+    DataArm,
+    DataArmSpec,
+    HorizonForecast,
+    ModelFamily,
+    RunStage,
+)
 from bottrade.models.preprocessing import RobustStandardizer
 from bottrade.utils import deterministic_id, sha256_file, utc_now
 
@@ -22,11 +29,19 @@ class ModelMetadata(BaseModel):
     version: str
     asset: Asset
     family: ModelFamily
-    data_arm: DataArm
+    data_arm: DataArm | str
     stage: RunStage = RunStage.DEVELOPMENT
     trained_at: datetime
     training_end: datetime
     horizon_hours: int
+    forecast_horizons: list[int] = Field(default_factory=lambda: [3])
+    ensemble_seeds: list[int] = Field(default_factory=list)
+    ensemble_id: str = ""
+    horizon_artifacts: dict[str, dict[str, str]] = Field(default_factory=dict)
+    multitask_artifact: str = ""
+    policy_version: str = "v1"
+    probability_threshold: float = 0.5
+    cost_margin_bps: float = 0.0
     sequence_length: int
     feature_names: list[str]
     feature_schema_version: str
@@ -45,6 +60,7 @@ class ModelMetadata(BaseModel):
     stress_metrics: dict[str, float | int] = Field(default_factory=dict)
     benchmark_metrics: dict[str, dict[str, float | int]] = Field(default_factory=dict)
     predictive_metrics: dict[str, float | int] = Field(default_factory=dict)
+    statistical_metrics: dict[str, float | bool] = Field(default_factory=dict)
     regime_metrics: dict[str, dict[str, Any]] = Field(default_factory=dict)
     operational_metrics: dict[str, float | int | str] = Field(default_factory=dict)
     source_control: dict[str, str | bool] = Field(default_factory=dict)
@@ -69,9 +85,33 @@ class OnnxPredictor:
             str(bundle_path / "model.onnx"), providers=["CPUExecutionProvider"]
         )
         self.standardizer: RobustStandardizer | None = None
+        self.horizon_sessions: dict[int, tuple[Any, Any]] = {}
+        self.multitask_session: Any | None = None
         preprocessor_path = bundle_path / "preprocessor.json"
         if preprocessor_path.exists():
             self.standardizer = RobustStandardizer.read(preprocessor_path)
+        horizon_manifest = bundle_path / "multihorizon.json"
+        if horizon_manifest.exists():
+            manifest = json.loads(horizon_manifest.read_text(encoding="utf-8"))
+            for horizon, files in manifest.get("files", {}).items():
+                if not isinstance(files, (list, tuple)) or len(files) != 2:
+                    raise ValueError("invalid multi-horizon artifact manifest")
+                regression_path = bundle_path / str(files[0])
+                classification_path = bundle_path / str(files[1])
+                self.horizon_sessions[int(horizon)] = (
+                    ort.InferenceSession(
+                        str(regression_path), providers=["CPUExecutionProvider"]
+                    ),
+                    ort.InferenceSession(
+                        str(classification_path), providers=["CPUExecutionProvider"]
+                    ),
+                )
+        multitask_name = metadata.multitask_artifact or "multihorizon_transformer.onnx"
+        multitask_path = bundle_path / multitask_name
+        if multitask_path.exists():
+            self.multitask_session = ort.InferenceSession(
+                str(multitask_path), providers=["CPUExecutionProvider"]
+            )
 
     def predict_latest(self, feature_values: np.ndarray) -> float:
         expected_features = len(self.metadata.feature_names)
@@ -91,6 +131,78 @@ class OnnxPredictor:
             row = feature_values[-1:].astype(np.float32)
             result = self.session.run(None, {"features": row})[0]
         return float(np.asarray(result).reshape(-1)[0])
+
+    def predict_horizons(
+        self,
+        feature_values: np.ndarray,
+        *,
+        volatility: float,
+        round_trip_cost: float,
+        probability_threshold: float,
+        margin_bps: float,
+    ) -> tuple[HorizonForecast, ...]:
+        """Return cost-aware horizon forecasts when a V2 sidecar is present."""
+
+        if not self.horizon_sessions and self.multitask_session is None:
+            return ()
+        if not np.isfinite(volatility) or volatility <= 0:
+            raise ValueError("volatility must be positive for horizon forecasts")
+        output: list[HorizonForecast] = []
+        if self.metadata.family == ModelFamily.TRANSFORMER:
+            if self.standardizer is None:
+                raise RuntimeError("Transformer bundle is missing preprocessor.json")
+            transformed = self.standardizer.transform(feature_values)
+            sequence = transformed[-self.metadata.sequence_length :][None, :, :].astype(np.float32)
+            feed = {"sequence": sequence}
+        elif self.horizon_sessions:
+            feed = {"features": feature_values[-1:].astype(np.float32)}
+        else:
+            feed = {"sequence": feature_values[-self.metadata.sequence_length :][None, :, :].astype(np.float32)}
+        if self.multitask_session is not None:
+            outputs = self.multitask_session.run(None, feed)
+            normalized_values = np.asarray(outputs[0]).reshape(-1)
+            probabilities = 1.0 / (1.0 + np.exp(-np.asarray(outputs[1]).reshape(-1)))
+            for position, horizon in enumerate(self.metadata.forecast_horizons):
+                if position >= len(normalized_values):
+                    break
+                gross = float(normalized_values[position] * volatility)
+                output.append(
+                    HorizonForecast(
+                        horizon_hours=int(horizon),
+                        expected_gross_return=gross,
+                        expected_net_return=gross - round_trip_cost,
+                        probability_net_positive=float(probabilities[position]),
+                        threshold_probability=probability_threshold,
+                        cost_margin_bps=margin_bps,
+                    )
+                )
+            return tuple(output)
+        for horizon in sorted(self.horizon_sessions):
+            regression_session, classification_session = self.horizon_sessions[horizon]
+            normalized = float(np.asarray(regression_session.run(None, feed)[0]).reshape(-1)[0])
+            probability_output = classification_session.run(None, feed)
+            probability = probability_output[-1]
+            if isinstance(probability, list) and probability and isinstance(probability[0], dict):
+                mapping = probability[0]
+                probability_value = float(mapping.get(1, mapping.get("1", 0.0)))
+            else:
+                probability_array = np.asarray(probability)
+                if probability_array.ndim == 2 and probability_array.shape[1] >= 2:
+                    probability_value = float(probability_array[0, 1])
+                else:
+                    probability_value = float(probability_array.reshape(-1)[0])
+            gross = normalized * float(volatility)
+            output.append(
+                HorizonForecast(
+                    horizon_hours=horizon,
+                    expected_gross_return=gross,
+                    expected_net_return=gross - round_trip_cost,
+                    probability_net_positive=probability_value,
+                    threshold_probability=probability_threshold,
+                    cost_margin_bps=margin_bps,
+                )
+            )
+        return tuple(output)
 
 
 class ModelRegistry:
@@ -139,6 +251,28 @@ class ModelRegistry:
         runtime_files = ["model.onnx"]
         if (temporary / "preprocessor.json").exists():
             runtime_files.append("preprocessor.json")
+        multihorizon_manifest = temporary / "multihorizon.json"
+        if multihorizon_manifest.exists():
+            manifest = json.loads(multihorizon_manifest.read_text(encoding="utf-8"))
+            runtime_files.append("multihorizon.json")
+            normalized_artifacts: dict[str, dict[str, str]] = {}
+            for horizon, files in manifest.get("files", {}).items():
+                if not isinstance(files, (list, tuple)) or len(files) != 2:
+                    raise ValueError("invalid multi-horizon artifact manifest")
+                for file in files:
+                    candidate = (temporary / str(file)).resolve()
+                    if not candidate.is_relative_to(temporary.resolve()) or not candidate.is_file():
+                        raise ValueError("multi-horizon artifact escaped the model bundle")
+                normalized_artifacts[str(horizon)] = {
+                    "regression": str(files[0]),
+                    "classification": str(files[1]),
+                }
+                runtime_files.extend(str(file) for file in files)
+            metadata.horizon_artifacts = normalized_artifacts
+        multitask_path = temporary / "multihorizon_transformer.onnx"
+        if multitask_path.exists():
+            runtime_files.append(multitask_path.name)
+            metadata.multitask_artifact = multitask_path.name
         metadata.bundle_hashes = {
             name: sha256_file(temporary / name) for name in runtime_files
         }
@@ -207,6 +341,17 @@ class ModelRegistry:
             reasons.append("did_not_beat_benchmark")
         if not metadata.onnx_verified:
             reasons.append("onnx_not_verified")
+        if metadata.protocol_phase in {"holdout", "refit"} and metadata.forecast_horizons != [3]:
+            statistics = metadata.statistical_metrics
+            if statistics:
+                if float(statistics.get("deflated_sharpe_probability", 0.0)) < gates.minimum_dsr_probability:
+                    reasons.append("deflated_sharpe_below_gate")
+                if float(statistics.get("pbo", 1.0)) > gates.maximum_pbo:
+                    reasons.append("pbo_above_gate")
+                if float(statistics.get("seed_pass_count", 0.0)) < gates.minimum_seed_passes:
+                    reasons.append("seed_stability_below_gate")
+                if not bool(statistics.get("activity_gate_passed", False)):
+                    reasons.append("monthly_activity_below_gate")
         return reasons
 
     def _holdout_lineage_root(self, metadata: ModelMetadata) -> str:
@@ -258,7 +403,9 @@ class ModelRegistry:
             and metadata.protocol_phase != "refit"
         ):
             raise ValueError("paper promotion requires a completed canary")
-        if slot == "market_fallback" and metadata.data_arm != DataArm.MARKET:
+        if slot == "market_fallback" and DataArmSpec.from_id(metadata.data_arm).components != (
+            "market_1h",
+        ):
             raise ValueError("market_fallback must use the market-only arm")
         metadata.stage = stage
         if stage == RunStage.CANARY and metadata.canary_started_at is None:

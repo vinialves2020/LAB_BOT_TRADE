@@ -42,7 +42,20 @@ def _to_timestamp(values: pd.Series) -> pd.Series:
     return pd.to_datetime(numeric, unit=unit, utc=True, errors="coerce")
 
 
-def normalize_klines(frame: pd.DataFrame, interval_hours: int = 1) -> pd.DataFrame:
+def _interval_timedelta(interval: str | int | float) -> pd.Timedelta:
+    if isinstance(interval, (int, float)):
+        return pd.Timedelta(hours=float(interval))
+    value = str(interval).strip().lower()
+    if value.endswith("m"):
+        return pd.Timedelta(minutes=float(value.removesuffix("m")))
+    if value.endswith("h"):
+        return pd.Timedelta(hours=float(value.removesuffix("h")))
+    if value.endswith("d"):
+        return pd.Timedelta(days=float(value.removesuffix("d")))
+    raise ValueError(f"unsupported Binance interval: {interval}")
+
+
+def normalize_klines(frame: pd.DataFrame, interval_hours: int | float | str = 1) -> pd.DataFrame:
     if frame.empty:
         return pd.DataFrame(columns=[*KLINE_COLUMNS[:-1], "as_of", "is_closed"])
     data = frame.copy()
@@ -62,7 +75,7 @@ def normalize_klines(frame: pd.DataFrame, interval_hours: int = 1) -> pd.DataFra
     ]
     for column in numeric_columns:
         data[column] = pd.to_numeric(data[column], errors="coerce")
-    data["as_of"] = data["open_time"] + pd.Timedelta(hours=interval_hours)
+    data["as_of"] = data["open_time"] + _interval_timedelta(interval_hours)
     now = pd.Timestamp.now(tz="UTC")
     data["is_closed"] = data["as_of"] <= now
     data = data.drop(columns=["ignore"])
@@ -83,15 +96,19 @@ class BinanceClient:
         if self._owns_http:
             self.http.close()
 
-    def _archive_url(self, symbol: str, year: int, month: int) -> str:
-        filename = f"{symbol}-{self.config.interval}-{year:04d}-{month:02d}.zip"
+    def _archive_url(self, symbol: str, year: int, month: int, interval: str | None = None) -> str:
+        interval = interval or self.config.interval
+        filename = f"{symbol}-{interval}-{year:04d}-{month:02d}.zip"
         return (
             f"{self.config.archive_base_url}/data/spot/monthly/klines/"
-            f"{symbol}/{self.config.interval}/{filename}"
+            f"{symbol}/{interval}/{filename}"
         )
 
-    def fetch_archive_month(self, symbol: str, year: int, month: int) -> tuple[pd.DataFrame, str, str]:
-        url = self._archive_url(symbol, year, month)
+    def fetch_archive_month(
+        self, symbol: str, year: int, month: int, *, interval: str | None = None
+    ) -> tuple[pd.DataFrame, str, str]:
+        interval = interval or self.config.interval
+        url = self._archive_url(symbol, year, month, interval)
         payload = self.http.get_bytes(url)
         checksum_url = f"{url}.CHECKSUM"
         try:
@@ -109,7 +126,7 @@ class BinanceClient:
                 raise ValueError(f"expected exactly one CSV in {url}, found {csv_names}")
             with archive.open(csv_names[0]) as handle:
                 frame = pd.read_csv(handle, header=None)
-        return normalize_klines(frame), url, sha256_bytes(payload)
+        return normalize_klines(frame, interval), url, sha256_bytes(payload)
 
     def fetch_klines_rest(
         self,
@@ -118,19 +135,21 @@ class BinanceClient:
         end: datetime,
         *,
         limit: int = 1000,
+        interval: str | None = None,
     ) -> pd.DataFrame:
         url = f"{self.config.rest_base_url}/api/v3/klines"
         start_ms = int(start.astimezone(UTC).timestamp() * 1000)
         end_ms = int(end.astimezone(UTC).timestamp() * 1000)
         rows: list[list[Any]] = []
         cursor = start_ms
-        interval_ms = 60 * 60 * 1000
+        interval = interval or self.config.interval
+        interval_ms = int(_interval_timedelta(interval).total_seconds() * 1000)
         while cursor <= end_ms:
             batch = self.http.get_json(
                 url,
                 params={
                     "symbol": symbol,
-                    "interval": self.config.interval,
+                    "interval": interval,
                     "startTime": cursor,
                     "endTime": end_ms,
                     "limit": limit,
@@ -145,15 +164,18 @@ class BinanceClient:
             cursor = next_cursor
             if len(batch) < limit:
                 break
-        return normalize_klines(pd.DataFrame(rows))
+        return normalize_klines(pd.DataFrame(rows), interval)
 
-    def fetch_recent_klines(self, symbol: str, limit: int = 500) -> pd.DataFrame:
+    def fetch_recent_klines(
+        self, symbol: str, limit: int = 500, *, interval: str | None = None
+    ) -> pd.DataFrame:
         url = f"{self.config.rest_base_url}/api/v3/klines"
+        interval = interval or self.config.interval
         rows = self.http.get_json(
             url,
-            params={"symbol": symbol, "interval": self.config.interval, "limit": limit},
+            params={"symbol": symbol, "interval": interval, "limit": limit},
         )
-        return normalize_klines(pd.DataFrame(rows))
+        return normalize_klines(pd.DataFrame(rows), interval)
 
     def sync_history(
         self,
@@ -162,7 +184,9 @@ class BinanceClient:
         end: datetime,
         output_path: Path,
         manifest: DatasetManifest,
+        interval: str | None = None,
     ) -> pd.DataFrame:
+        interval = interval or self.config.interval
         periods = pd.period_range(start=start.date(), end=end.date(), freq="M")
         frames: list[pd.DataFrame] = []
         source_urls: list[str] = []
@@ -171,12 +195,16 @@ class BinanceClient:
             next_month = (pd.Timestamp(month_start) + pd.offsets.MonthBegin(1)).to_pydatetime()
             month_end = min(end, next_month - timedelta(microseconds=1))
             try:
-                frame, url, _ = self.fetch_archive_month(symbol, period.year, period.month)
+                frame, url, _ = self.fetch_archive_month(
+                    symbol, period.year, period.month, interval=interval
+                )
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code != 404:
                     raise
                 LOGGER.info("Monthly archive missing; using REST for %s %s", symbol, period)
-                frame = self.fetch_klines_rest(symbol, max(start, month_start), month_end)
+                frame = self.fetch_klines_rest(
+                    symbol, max(start, month_start), month_end, interval=interval
+                )
                 url = f"{self.config.rest_base_url}/api/v3/klines"
             frames.append(frame)
             source_urls.append(url)
@@ -191,7 +219,7 @@ class BinanceClient:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         combined.to_parquet(output_path, index=False)
         manifest.add_file(
-            source="binance_spot_klines",
+            source=f"binance_spot_klines_{interval}",
             url=",".join(dict.fromkeys(source_urls)),
             path=output_path,
             rows=len(combined),
