@@ -19,7 +19,7 @@ from bottrade.v3.datasets import (
 )
 from bottrade.v3.features import V3FeatureBuilder
 from bottrade.v3.labels import label_candidates
-from bottrade.v3.meta_models import fit_meta_model
+from bottrade.v3.meta_models import MetaModelBundle, fit_meta_model
 from bottrade.v3.portfolio import portfolio_backtest
 from bottrade.v3.selection import claim_holdout, create_selection_lock, load_selection_lock
 from bottrade.v3.statistics import daily_compounded_returns, evaluate_gates
@@ -394,6 +394,76 @@ def meta_train(
     _emit(
         {"family": family, "asset": target.value, "rows": len(table), "features": len(feature_columns), "members": summaries},
         output_dir / "metrics.json",
+    )
+
+
+@v3_app.command("export-onnx")
+def export_onnx(
+    features_path: Annotated[Path, typer.Option("--features")],
+    candidates_path: Annotated[Path, typer.Option("--candidates")],
+    labels_path: Annotated[Path, typer.Option("--labels")],
+    asset: Annotated[str, typer.Option("--asset")],
+    family: Annotated[str, typer.Option("--family")],
+    models_dir: Annotated[Path, typer.Option("--models-dir")],
+    output: Annotated[Path, typer.Option("--output")],
+    config_path: Annotated[Path, typer.Option("--config")] = Path("config/v3.yaml"),
+    seeds: Annotated[str | None, typer.Option("--seeds", help="Lista; padrão são as cinco seeds V3.")] = None,
+) -> None:
+    """Export every native ensemble member to ONNX and verify numeric parity."""
+
+    target = _asset(asset)
+    config = _config(config_path)
+    feature_frame = read_versioned_table(features_path, config=config)
+    candidate_frame = read_versioned_table(candidates_path, config=config)
+    label_frame = read_versioned_table(labels_path, config=config)
+    table, feature_columns = build_meta_table(feature_frame, candidate_frame, label_frame)
+    table = prepare_targets(table)
+    if table.empty:
+        raise typer.BadParameter("meta table is empty after point-in-time joins")
+    sequence_values: Any | None = None
+    if family == "transformer":
+        sequence_values, sequence_valid = build_transformer_sequences(
+            table,
+            feature_frame,
+            feature_columns,
+            lookback=config.lookback_hours,
+        )
+        table = table.loc[sequence_valid].reset_index(drop=True)
+        sequence_values = sequence_values[sequence_valid]
+    values = (
+        sequence_values
+        if sequence_values is not None
+        else table[feature_columns].to_numpy(dtype="float32")
+    )
+    if len(values) == 0:
+        raise typer.BadParameter("no valid rows available for ONNX parity sample")
+    sample = values[: min(32, len(values))]
+    seed_values = config.seeds if not seeds else tuple(int(item.strip()) for item in seeds.split(","))
+    output.mkdir(parents=True, exist_ok=True)
+    summaries: list[dict[str, Any]] = []
+    for seed in seed_values:
+        member_dir = models_dir / f"seed_{seed}"
+        if not (member_dir / "bundle.joblib").exists():
+            raise typer.BadParameter(f"bundle não encontrado: {member_dir / 'bundle.joblib'}")
+        bundle = MetaModelBundle.load_native(member_dir)
+        if bundle.family != family:
+            raise typer.BadParameter(
+                f"family divergente no bundle {member_dir}: {bundle.family} != {family}"
+            )
+        onnx_dir = output / f"seed_{seed}"
+        parity = bundle.export_onnx(onnx_dir, sample)
+        summaries.append({"seed": seed, "artifact": str(onnx_dir), **parity})
+    _emit(
+        {
+            "asset": target.value,
+            "family": family,
+            "rows": len(table),
+            "features": len(feature_columns),
+            "members": summaries,
+            "tolerance": 1e-4,
+            "holdout_claimed": False,
+        },
+        output / "metrics.json",
     )
 
 

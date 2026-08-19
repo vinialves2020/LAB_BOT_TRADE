@@ -80,7 +80,7 @@ holdout fechado por padrão:
     bottrade v3 labels --candidates data/processed/v3/BTCUSDT/candidates.parquet --intrahour data/raw/market/BTCUSDT_15m.parquet --output data/processed/v3/BTCUSDT/labels.parquet
     bottrade v3 deterministic --labels data/processed/v3/BTCUSDT/labels.parquet --output-dir reports/generated/v3/BTCUSDT/deterministic
 
-Os comandos `meta-train`, `portfolio`, `select`, `report` e `holdout` estão
+Os comandos `meta-train`, `export-onnx`, `portfolio`, `select`, `report` e `holdout` estão
 descritos em [docs/ACCEPTANCE_V3.md](docs/ACCEPTANCE_V3.md). `--params-json`
 marca um smoke-test; resultados assim não podem ser promovidos.
 

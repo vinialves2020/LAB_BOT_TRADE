@@ -29,10 +29,36 @@ walk-forward e o salvamento nativo. Depois da remoção dos campos de resultado
 que vazavam para as features, ele teve 1 trade fechado e retorno −1,18%. Não é
 resultado de seleção, não é ensemble e não pode ser promovido.
 
+## Treino oficial HGB — BTCUSDT
+
+Em 2026-08-19 foi executado o primeiro treino pré-holdout completo da V3 para
+BTCUSDT com `hist_gradient_boosting`, no braço `market_1h + intrahour_15m`.
+O conjunto final teve 42.514 linhas e 93 features após o join ponto-no-tempo,
+com 32 folds mensais gap-aware. Foram treinadas as cinco seeds obrigatórias
+`11, 23, 37, 53, 71`; nenhuma seed selecionou uma operação:
+
+| Seed | Folds | Trades fechados | Retorno líquido | Sharpe HAC | Drawdown |
+|---:|---:|---:|---:|---:|---:|
+| 11 | 32 | 0 | 0,00% | 0,00 | 0,00% |
+| 23 | 32 | 0 | 0,00% | 0,00 | 0,00% |
+| 37 | 32 | 0 | 0,00% | 0,00 | 0,00% |
+| 53 | 32 | 0 | 0,00% | 0,00 | 0,00% |
+| 71 | 32 | 0 | 0,00% | 0,00 | 0,00% |
+
+O resultado é inconclusivo do ponto de vista econômico, mas operacionalmente
+reprodutível. O gate de frequência falha (mínimo de 20 trades/mês, piso de 10
+por mês e 60 na calibração); por isso não há candidato, campeão ou seleção
+lock. O holdout permanece fechado.
+
+Todos os cinco bundles nativos foram exportados para ONNX. A maior diferença
+absoluta entre execução nativa e ONNX foi `1,9172e-7`, abaixo da tolerância
+protocolar `1e-4`, em cada seed. Essa verificação garante portabilidade, não
+qualidade preditiva.
+
 ## Decisão
 
-BTC, ETH e SOL permanecem em caixa. O próximo experimento deve completar as
-ablações e as cinco seeds finais; qualquer resultado precisa passar os gates de
-frequência, custo dobrado, risco, DSR/PBO e estabilidade antes da criação do
-selection lock. Nenhum número desta página autoriza holdout, canário, paper
-oficial ou capital real.
+BTC, ETH e SOL permanecem em caixa. O HGB de BTC não é promovido e não autoriza
+holdout, canário, paper oficial ou capital real. O próximo experimento deve
+continuar pelas ablações pré-holdout (RF e Transformer em patches) e tratar a
+frequência nula como diagnóstico de sinal/gate, sem relaxar os limites de risco
+ou forçar operações.

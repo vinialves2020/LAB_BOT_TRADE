@@ -17,7 +17,8 @@
   derivativos sem colunas de alvo;
 - gates mensais de frequência e comando `v3 gates`;
 - holdout fechado por padrão;
-- 11 testes V3 passando.
+- comando `v3 export-onnx` para exportação e paridade de cada membro do ensemble;
+- 16 testes V3 passando.
 
 ## Replay pré-holdout executado
 
@@ -30,6 +31,12 @@ cost-aware. Ele serve para verificar o encadeamento, não é candidato de
 promoção. A primeira execução de 300 iterações foi descartada após a auditoria
 encontrar campos de resultado vazando para a matriz; nenhum desses números será
 usado em seleção.
+
+O primeiro treino oficial HGB de BTCUSDT (42.514 linhas, 93 features, 32 folds,
+cinco seeds) terminou com zero trades em todas as seeds. Os bundles nativos
+passaram a exportação ONNX com erro máximo `1,9172e-7` (< `1e-4`), mas o gate
+econômico/frequência falhou e o modelo não foi promovido. O detalhe está em
+[RESULTS_V3_PREHOLDOUT.md](RESULTS_V3_PREHOLDOUT.md).
 
 ## Próximo passo seguro
 
