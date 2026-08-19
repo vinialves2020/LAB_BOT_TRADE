@@ -38,6 +38,11 @@ passaram a exportação ONNX com erro máximo `1,9172e-7` (< `1e-4`), mas o gate
 econômico/frequência falhou e o modelo não foi promovido. O detalhe está em
 [RESULTS_V3_PREHOLDOUT.md](RESULTS_V3_PREHOLDOUT.md).
 
+O RF oficial foi iniciado no mesmo braço, mas foi interrompido após 30,25
+minutos de parede por custo computacional; nenhuma seed terminou e não há
+métrica válida. A retomada exige uma decisão explícita de orçamento, registrada
+antes de novo treino.
+
 ## Próximo passo seguro
 
 1. Regerar features/candidatos/labels para ETHUSDT e SOLUSDT.

@@ -55,10 +55,22 @@ absoluta entre execução nativa e ONNX foi `1,9172e-7`, abaixo da tolerância
 protocolar `1e-4`, em cada seed. Essa verificação garante portabilidade, não
 qualidade preditiva.
 
+## RF oficial — execução interrompida por custo
+
+O RF foi iniciado no mesmo braço e com a configuração oficial. Após 30,25
+minutos de parede (aproximadamente 5,31 horas de CPU acumulada), nenhuma seed
+terminou e nenhum artefato de modelo foi escrito. O processo foi encerrado por
+limite operacional de computação, com `metrics_valid: false`; isso não é uma
+falha econômica nem um resultado de backtest. O registro da interrupção está em
+`reports/generated/v3/BTCUSDT/rf_official/INTERRUPTED.json`. Para retomar, será
+necessário escolher explicitamente entre uma janela computacional maior ou um
+orçamento RF congelado e pré-registrado; não se deve aproveitar qualquer saída
+parcial.
+
 ## Decisão
 
 BTC, ETH e SOL permanecem em caixa. O HGB de BTC não é promovido e não autoriza
 holdout, canário, paper oficial ou capital real. O próximo experimento deve
-continuar pelas ablações pré-holdout (RF e Transformer em patches) e tratar a
-frequência nula como diagnóstico de sinal/gate, sem relaxar os limites de risco
-ou forçar operações.
+continuar pelas ablações pré-holdout (RF com orçamento computacional decidido e
+Transformer em patches) e tratar a frequência nula como diagnóstico de
+sinal/gate, sem relaxar os limites de risco ou forçar operações.
