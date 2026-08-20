@@ -13,6 +13,7 @@ from bottrade.domain import Asset
 from bottrade.v4.backtest import run_walk_forward
 from bottrade.v4.config import load_v4_config
 from bottrade.v4.features import build_direct_dataset, build_features, load_raw_market
+from bottrade.v4.joint import run_joint_walk_forward
 from bottrade.v4.search import run_parameter_search
 
 v4_app = typer.Typer(
@@ -255,3 +256,114 @@ def tune(
     report_path = output_dir / "tuning.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True, default=str), encoding="utf-8")
     typer.echo(f"Relatório de tuning {v4_config.protocol_version}: {report_path}")
+
+
+@v4_app.command("joint")
+def joint(
+    asset: Annotated[
+        str, typer.Option(help="Ativo de desenvolvimento; V4.4 usa BTCUSDT por padrão.")
+    ] = "BTCUSDT",
+    family: Annotated[
+        str, typer.Option(help="xgboost ou hist_gradient_boosting.")
+    ] = "xgboost",
+    max_folds: Annotated[
+        int | None,
+        typer.Option(help="Piloto usa os últimos N folds; vazio executa todos os folds válidos."),
+    ] = 12,
+    config_path: Annotated[
+        Path, typer.Option("--v4-config", help="Configuração V4.4 conjunta.")
+    ] = Path("config/v4_joint.yaml"),
+    app_config_path: Annotated[
+        Path, typer.Option("--app-config", help="Configuração de dados do projeto.")
+    ] = Path("config/default.yaml"),
+    device: Annotated[
+        str | None,
+        typer.Option(help="cpu ou cuda; sobrescrever somente para experimento explícito."),
+    ] = None,
+) -> None:
+    """Run the V4.4 classification + regression challenger for one asset."""
+
+    try:
+        current_asset = Asset(asset)
+    except ValueError as exc:
+        raise typer.BadParameter("asset deve ser BTCUSDT, ETHUSDT ou SOLUSDT") from exc
+    if family not in {"xgboost", "hist_gradient_boosting"}:
+        raise typer.BadParameter("family deve ser xgboost ou hist_gradient_boosting")
+    if max_folds is not None and max_folds < 1:
+        raise typer.BadParameter("max_folds deve ser positivo")
+    v4_config = load_v4_config(config_path)
+    if device is not None:
+        if device not in {"cpu", "cuda"}:
+            raise typer.BadParameter("device deve ser cpu ou cuda")
+        v4_config = replace(v4_config, device=device).validate()
+    app_config = load_config(app_config_path)
+    app_config.ensure_directories()
+    market = {
+        item.value: load_raw_market(app_config.project.data_dir, item, "1h")
+        for item in Asset
+    }
+    intrahour = (
+        {
+            item.value: load_raw_market(app_config.project.data_dir, item, "15m")
+            for item in Asset
+        }
+        if v4_config.include_intrahour_15m
+        else None
+    )
+    features = build_features(
+        asset=current_asset,
+        market=market,
+        intrahour=intrahour,
+        config=v4_config,
+    )
+    dataset = build_direct_dataset(
+        asset=current_asset,
+        features=features,
+        market=market[current_asset.value],
+        config=v4_config,
+        pre_holdout_only=True,
+    )
+    result = run_joint_walk_forward(
+        dataset,
+        config=v4_config,
+        family=family,  # type: ignore[arg-type]
+        max_folds=max_folds,
+    )
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    output_dir = app_config.project.artifact_dir / "v4" / "joint" / run_id / family / current_asset.value
+    output_dir.mkdir(parents=True, exist_ok=True)
+    result.trades.to_parquet(output_dir / "trades.parquet", index=False)
+    payload = {
+        "protocol": "docs/PROTOCOL_V4_4_JOINT.md",
+        "protocol_version": v4_config.protocol_version,
+        "run_id": run_id,
+        "asset": current_asset.value,
+        "family": family,
+        "rows": int(len(dataset.frame)),
+        "valid_labels": int(dataset.frame["label_valid"].sum()),
+        "features": len(dataset.feature_columns),
+        "feature_names": list(dataset.feature_columns),
+        "folds": [
+            {
+                "name": fold.name,
+                "probability_threshold": fold.policy.probability_threshold,
+                "margin_bps": fold.policy.margin_bps,
+                "calibration": fold.calibration,
+                "metrics": fold.metrics,
+                "seed_metrics": fold.seed_metrics,
+            }
+            for fold in result.folds
+        ],
+        "metrics": result.metrics,
+        "top_features": list(result.feature_importance.items())[:25],
+    }
+    report_path = output_dir / "result.json"
+    report_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True, default=str), encoding="utf-8"
+    )
+    typer.echo(
+        f"{current_asset.value}/{family}: {result.metrics['closed_trades']} trades, "
+        f"retorno={result.metrics['total_return']:.4%}, "
+        f"Sharpe={result.metrics['sharpe_daily']:.2f}"
+    )
+    typer.echo(f"Relatório V4.4: {report_path}")
