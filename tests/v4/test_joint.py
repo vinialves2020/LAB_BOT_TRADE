@@ -72,3 +72,8 @@ def test_joint_policy_requires_probability_and_return() -> None:
     assert len(trades) == 1
     assert trades.iloc[0]["entry_time"] == times[1]
 
+
+def test_normalized_protocol_config_is_explicit() -> None:
+    config = load_v4_config("config/v4_normalized.yaml")
+    assert config.normalized_return_target is True
+    assert config.protocol_version.startswith("v4.5")

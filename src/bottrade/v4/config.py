@@ -26,6 +26,7 @@ class V4Config:
     stateful_hourly: bool = False
     max_holding_hours: int = 12
     exit_on_non_positive: bool = False
+    normalized_return_target: bool = False
     round_trip_bps: float = 24.0
     stress_multiplier: float = 2.0
     entry_margins_bps: tuple[int, ...] = (0, 5, 10, 20, 30)
@@ -110,6 +111,9 @@ def load_v4_config(path: str | Path = "config/v4.yaml") -> V4Config:
         stateful_hourly=bool(model.get("stateful_hourly", defaults.stateful_hourly)),
         max_holding_hours=int(model.get("max_holding_hours", defaults.max_holding_hours)),
         exit_on_non_positive=bool(model.get("exit_on_non_positive", defaults.exit_on_non_positive)),
+        normalized_return_target=bool(
+            model.get("normalized_return_target", defaults.normalized_return_target)
+        ),
         round_trip_bps=float(costs.get("round_trip_bps", defaults.round_trip_bps)),
         stress_multiplier=float(costs.get("stress_multiplier", defaults.stress_multiplier)),
         entry_margins_bps=tuple(

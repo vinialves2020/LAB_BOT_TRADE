@@ -391,6 +391,26 @@ def run_joint_walk_forward(
     frame = _valid_frame(dataset)
     if frame.empty:
         raise ValueError("dataset has no valid pre-holdout labels")
+    raw_target_return = frame[dataset.target_column].to_numpy(dtype=float)
+    if config.normalized_return_target:
+        if "ewma_volatility_1h" not in frame:
+            raise ValueError("normalized target requires ewma_volatility_1h in the feature schema")
+        raw_volatility = pd.to_numeric(
+            frame["ewma_volatility_1h"], errors="coerce"
+        ).to_numpy(dtype=float)
+        usable = np.isfinite(raw_volatility) & (raw_volatility >= 0.0)
+        frame = frame.loc[usable].reset_index(drop=True)
+        raw_target_return = raw_target_return[usable]
+        # A zero-volatility candle has no directional information; the tiny
+        # floor keeps the normalized target finite without inventing a price
+        # or volume observation.
+        target_volatility = np.maximum(raw_volatility[usable], 1e-6)
+        y_return = (raw_target_return / target_volatility).astype(np.float32)
+    else:
+        target_volatility = np.ones(len(frame), dtype=float)
+        y_return = raw_target_return.astype(np.float32)
+    if frame.empty:
+        raise ValueError("normalized target has no rows with causal volatility")
     timestamps = pd.to_datetime(frame["as_of"], utc=True)
     folds = walk_forward_folds(
         timestamps,
@@ -414,7 +434,6 @@ def run_joint_walk_forward(
         raise ValueError("fold_selection must be 'first' or 'last'")
 
     x = frame[list(dataset.feature_columns)].to_numpy(dtype=np.float32)
-    y_return = frame[dataset.target_column].to_numpy(dtype=np.float32)
     y_class = (frame["gross_return"].to_numpy(dtype=float) > config.round_trip_bps / 10_000.0).astype(int)
     results: list[JointFoldResult] = []
     all_trades: list[pd.DataFrame] = []
@@ -431,8 +450,9 @@ def run_joint_walk_forward(
         ensemble.fit(x, y_return, y_class, fold.train_indices)
         cal_reg_members = ensemble.predict_reg_members(x, fold.calibration_indices)
         cal_prob_members = ensemble.predict_prob_members(x, fold.calibration_indices)
-        cal_reg = cal_reg_members.mean(axis=0)
-        cal_reg_std = cal_reg_members.std(axis=0, ddof=0)
+        calibration_volatility = target_volatility[fold.calibration_indices]
+        cal_reg = cal_reg_members.mean(axis=0) * calibration_volatility
+        cal_reg_std = cal_reg_members.std(axis=0, ddof=0) * calibration_volatility
         cal_prob = cal_prob_members.mean(axis=0)
         calibrator = fit_probability_calibrator(cal_prob, y_class[fold.calibration_indices])
         cal_prob = calibrator.transform(cal_prob)
@@ -445,8 +465,9 @@ def run_joint_walk_forward(
         )
         test_reg_members = ensemble.predict_reg_members(x, fold.test_indices)
         test_prob_members = ensemble.predict_prob_members(x, fold.test_indices)
-        test_reg = test_reg_members.mean(axis=0)
-        test_reg_std = test_reg_members.std(axis=0, ddof=0)
+        test_volatility = target_volatility[fold.test_indices]
+        test_reg = test_reg_members.mean(axis=0) * test_volatility
+        test_reg_std = test_reg_members.std(axis=0, ddof=0) * test_volatility
         test_prob = calibrator.transform(test_prob_members.mean(axis=0))
         test_frame = frame.iloc[fold.test_indices].reset_index(drop=True)
         trades = select_joint_stateful_trades(
@@ -480,7 +501,7 @@ def run_joint_walk_forward(
             member_prob = calibrator.transform(prob_member)
             member_trades = select_joint_stateful_trades(
                 test_frame,
-                reg_member,
+                reg_member * test_volatility,
                 np.zeros(len(reg_member), dtype=float),
                 member_prob,
                 config=config,

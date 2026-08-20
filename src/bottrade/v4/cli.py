@@ -333,8 +333,13 @@ def joint(
     output_dir = app_config.project.artifact_dir / "v4" / "joint" / run_id / family / current_asset.value
     output_dir.mkdir(parents=True, exist_ok=True)
     result.trades.to_parquet(output_dir / "trades.parquet", index=False)
+    protocol_doc = (
+        "docs/PROTOCOL_V4_5_NORMALIZED.md"
+        if v4_config.protocol_version.startswith("v4.5")
+        else "docs/PROTOCOL_V4_4_JOINT.md"
+    )
     payload = {
-        "protocol": "docs/PROTOCOL_V4_4_JOINT.md",
+        "protocol": protocol_doc,
         "protocol_version": v4_config.protocol_version,
         "run_id": run_id,
         "asset": current_asset.value,
