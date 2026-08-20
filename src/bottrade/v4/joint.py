@@ -154,11 +154,15 @@ class JointEnsemble:
                 objective="reg:squarederror",
                 eval_metric="mae",
             )
-            clf = xgb.XGBClassifier(
+            classifier_params: dict[str, Any] = {
                 **common,
-                objective="binary:logistic",
-                eval_metric="logloss",
-            )
+                "objective": "binary:logistic",
+                "eval_metric": "logloss",
+            }
+            if self.config.classification_mode == "ordinal":
+                classifier_params["objective"] = "multi:softprob"
+                classifier_params["num_class"] = 3
+            clf = xgb.XGBClassifier(**classifier_params)
             return reg, clf
         DummyClassifier, HistGradientBoostingClassifier, HistGradientBoostingRegressor, _ = (
             _require_sklearn()
@@ -194,13 +198,26 @@ class JointEnsemble:
         values = np.asarray(x, dtype=np.float32)[np.asarray(indices, dtype=int)]
         return np.vstack([np.asarray(model.predict(values), dtype=float) for model in self.regressors])
 
-    def predict_prob_members(self, x: np.ndarray, indices: np.ndarray) -> np.ndarray:
+    def predict_class_members(self, x: np.ndarray, indices: np.ndarray) -> np.ndarray:
         values = np.asarray(x, dtype=np.float32)[np.asarray(indices, dtype=int)]
-        probabilities = []
+        class_count = 3 if self.config.classification_mode == "ordinal" else 2
+        probabilities: list[np.ndarray] = []
         for model in self.classifiers:
             predicted = np.asarray(model.predict_proba(values), dtype=float)
-            probabilities.append(predicted[:, 1] if predicted.shape[1] > 1 else predicted[:, 0])
-        return np.vstack(probabilities)
+            classes = np.asarray(getattr(model, "classes_", np.arange(predicted.shape[1])), dtype=int)
+            aligned = np.zeros((len(values), class_count), dtype=float)
+            for column, label in enumerate(classes):
+                if 0 <= int(label) < class_count:
+                    aligned[:, int(label)] = predicted[:, column]
+            probabilities.append(aligned)
+        return np.stack(probabilities, axis=0)
+
+    def predict_prob_members(self, x: np.ndarray, indices: np.ndarray) -> np.ndarray:
+        """Return positive-class probabilities for the binary V4.4 API."""
+
+        class_probabilities = self.predict_class_members(x, indices)
+        positive_column = 2 if self.config.classification_mode == "ordinal" else 1
+        return class_probabilities[:, :, positive_column]
 
     def feature_importance(self) -> dict[str, float]:
         values: list[np.ndarray] = []
@@ -234,6 +251,7 @@ def select_joint_stateful_trades(
     *,
     config: V4Config,
     policy: JointPolicy,
+    negative_probabilities: np.ndarray | None = None,
     cost_multiplier: float = 1.0,
 ) -> pd.DataFrame:
     """Long/flat policy requiring cost-paying regression and classification."""
@@ -244,6 +262,10 @@ def select_joint_stateful_trades(
     data["prediction"] = np.asarray(predictions, dtype=float)
     data["prediction_std"] = np.asarray(deviations, dtype=float)
     data["probability_net_positive"] = np.asarray(probabilities, dtype=float)
+    if negative_probabilities is None:
+        data["probability_net_negative"] = 1.0 - data["probability_net_positive"]
+    else:
+        data["probability_net_negative"] = np.asarray(negative_probabilities, dtype=float)
     for column in ("as_of", "entry_time", "exit_time"):
         data[column] = pd.to_datetime(data[column], utc=True)
     threshold = np.log1p(
@@ -285,9 +307,12 @@ def select_joint_stateful_trades(
         prediction = float(row.prediction)
         deviation = float(row.prediction_std)
         probability = float(row.probability_net_positive)
+        negative_probability = float(row.probability_net_negative)
         effective = prediction - config.uncertainty_std_multiplier * deviation
         valid = bool(row.label_valid) and np.isfinite(float(row.entry_price))
-        classification_ok = probability >= policy.probability_threshold
+        classification_ok = (
+            probability >= policy.probability_threshold and probability > negative_probability
+        )
         if position is not None:
             held_hours = (entry_time - pd.Timestamp(position["entry_time"])).total_seconds() / 3600.0
             should_exit = (
@@ -328,6 +353,7 @@ def choose_joint_policy(
     probabilities: np.ndarray,
     *,
     config: V4Config,
+    negative_probabilities: np.ndarray | None = None,
 ) -> tuple[JointPolicy, dict[str, Any]]:
     candidates: list[tuple[float, JointPolicy, dict[str, float | int]]] = []
     for probability_threshold in (0.50, 0.55, 0.60):
@@ -340,6 +366,7 @@ def choose_joint_policy(
                 probabilities,
                 config=config,
                 policy=policy,
+                negative_probabilities=negative_probabilities,
             )
             metrics = summarize_trades(trades)
             if int(metrics["closed_trades"]) < config.minimum_calibration_trades:
@@ -434,7 +461,16 @@ def run_joint_walk_forward(
         raise ValueError("fold_selection must be 'first' or 'last'")
 
     x = frame[list(dataset.feature_columns)].to_numpy(dtype=np.float32)
-    y_class = (frame["gross_return"].to_numpy(dtype=float) > config.round_trip_bps / 10_000.0).astype(int)
+    gross_returns = frame["gross_return"].to_numpy(dtype=float)
+    if config.classification_mode == "ordinal":
+        cost = config.round_trip_bps / 10_000.0
+        y_class = np.select(
+            [gross_returns < -cost, gross_returns > cost],
+            [0, 2],
+            default=1,
+        ).astype(int)
+    else:
+        y_class = (gross_returns > config.round_trip_bps / 10_000.0).astype(int)
     results: list[JointFoldResult] = []
     all_trades: list[pd.DataFrame] = []
     all_stress_trades: list[pd.DataFrame] = []
@@ -449,26 +485,48 @@ def run_joint_walk_forward(
         )
         ensemble.fit(x, y_return, y_class, fold.train_indices)
         cal_reg_members = ensemble.predict_reg_members(x, fold.calibration_indices)
-        cal_prob_members = ensemble.predict_prob_members(x, fold.calibration_indices)
+        cal_class_members = ensemble.predict_class_members(x, fold.calibration_indices)
         calibration_volatility = target_volatility[fold.calibration_indices]
         cal_reg = cal_reg_members.mean(axis=0) * calibration_volatility
         cal_reg_std = cal_reg_members.std(axis=0, ddof=0) * calibration_volatility
-        cal_prob = cal_prob_members.mean(axis=0)
-        calibrator = fit_probability_calibrator(cal_prob, y_class[fold.calibration_indices])
-        cal_prob = calibrator.transform(cal_prob)
+        cal_prob = cal_class_members[:, :, 2 if config.classification_mode == "ordinal" else 1].mean(axis=0)
+        positive_calibrator = fit_probability_calibrator(
+            cal_prob,
+            (y_class[fold.calibration_indices] == 2)
+            if config.classification_mode == "ordinal"
+            else y_class[fold.calibration_indices],
+        )
+        cal_prob = positive_calibrator.transform(cal_prob)
+        if config.classification_mode == "ordinal":
+            cal_negative = cal_class_members[:, :, 0].mean(axis=0)
+            negative_calibrator = fit_probability_calibrator(
+                cal_negative,
+                (y_class[fold.calibration_indices] == 0).astype(int),
+            )
+            cal_negative = negative_calibrator.transform(cal_negative)
+        else:
+            negative_calibrator = positive_calibrator
+            cal_negative = 1.0 - cal_prob
         policy, calibration = choose_joint_policy(
             frame.iloc[fold.calibration_indices].reset_index(drop=True),
             cal_reg,
             cal_reg_std,
             cal_prob,
             config=config,
+            negative_probabilities=cal_negative,
         )
         test_reg_members = ensemble.predict_reg_members(x, fold.test_indices)
-        test_prob_members = ensemble.predict_prob_members(x, fold.test_indices)
+        test_class_members = ensemble.predict_class_members(x, fold.test_indices)
         test_volatility = target_volatility[fold.test_indices]
         test_reg = test_reg_members.mean(axis=0) * test_volatility
         test_reg_std = test_reg_members.std(axis=0, ddof=0) * test_volatility
-        test_prob = calibrator.transform(test_prob_members.mean(axis=0))
+        test_prob = positive_calibrator.transform(
+            test_class_members[:, :, 2 if config.classification_mode == "ordinal" else 1].mean(axis=0)
+        )
+        if config.classification_mode == "ordinal":
+            test_negative = negative_calibrator.transform(test_class_members[:, :, 0].mean(axis=0))
+        else:
+            test_negative = 1.0 - test_prob
         test_frame = frame.iloc[fold.test_indices].reset_index(drop=True)
         trades = select_joint_stateful_trades(
             test_frame,
@@ -477,6 +535,7 @@ def run_joint_walk_forward(
             test_prob,
             config=config,
             policy=policy,
+            negative_probabilities=test_negative,
         )
         metrics = summarize_trades(trades)
         stress_trades = select_joint_stateful_trades(
@@ -486,19 +545,26 @@ def run_joint_walk_forward(
             test_prob,
             config=config,
             policy=policy,
+            negative_probabilities=test_negative,
             cost_multiplier=config.stress_multiplier,
         )
         metrics.update(
             {f"stress_{key}": value for key, value in summarize_trades(stress_trades).items()}
         )
         seed_metrics: dict[str, dict[str, float | int]] = {}
-        for seed, reg_member, prob_member in zip(
+        for seed, reg_member, class_member in zip(
             ensemble.seeds,
             test_reg_members,
-            test_prob_members,
+            test_class_members,
             strict=True,
         ):
-            member_prob = calibrator.transform(prob_member)
+            member_prob = positive_calibrator.transform(
+                class_member[:, 2 if config.classification_mode == "ordinal" else 1]
+            )
+            if config.classification_mode == "ordinal":
+                member_negative = negative_calibrator.transform(class_member[:, 0])
+            else:
+                member_negative = 1.0 - member_prob
             member_trades = select_joint_stateful_trades(
                 test_frame,
                 reg_member * test_volatility,
@@ -506,6 +572,7 @@ def run_joint_walk_forward(
                 member_prob,
                 config=config,
                 policy=policy,
+                negative_probabilities=member_negative,
             )
             seed_metrics[str(seed)] = summarize_trades(member_trades)
         results.append(
@@ -516,9 +583,12 @@ def run_joint_walk_forward(
                 seed_metrics,
                 {
                     "status": calibration.get("status", "unknown"),
-                    "probability_intercept": calibrator.intercept,
-                    "probability_slope": calibrator.slope,
-                    "probability_identity": calibrator.identity,
+                    "probability_intercept": positive_calibrator.intercept,
+                    "probability_slope": positive_calibrator.slope,
+                    "probability_identity": positive_calibrator.identity,
+                    "negative_probability_intercept": negative_calibrator.intercept,
+                    "negative_probability_slope": negative_calibrator.slope,
+                    "negative_probability_identity": negative_calibrator.identity,
                     "selected_trades": calibration.get("trades", 0),
                 },
                 trades,

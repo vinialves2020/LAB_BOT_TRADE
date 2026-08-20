@@ -344,6 +344,8 @@ def joint(
         "run_id": run_id,
         "asset": current_asset.value,
         "family": family,
+        "classification_mode": v4_config.classification_mode,
+        "normalized_return_target": v4_config.normalized_return_target,
         "rows": int(len(dataset.frame)),
         "valid_labels": int(dataset.frame["label_valid"].sum()),
         "features": len(dataset.feature_columns),
@@ -371,4 +373,4 @@ def joint(
         f"retorno={result.metrics['total_return']:.4%}, "
         f"Sharpe={result.metrics['sharpe_daily']:.2f}"
     )
-    typer.echo(f"Relatório V4.4: {report_path}")
+    typer.echo(f"Relatório {v4_config.protocol_version}: {report_path}")

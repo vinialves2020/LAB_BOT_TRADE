@@ -77,3 +77,25 @@ def test_normalized_protocol_config_is_explicit() -> None:
     config = load_v4_config("config/v4_normalized.yaml")
     assert config.normalized_return_target is True
     assert config.protocol_version.startswith("v4.5")
+
+
+def test_ordinal_ensemble_exposes_three_calibratable_classes() -> None:
+    config = replace(load_v4_config(), classification_mode="ordinal")
+    rng = np.random.default_rng(23)
+    x = rng.normal(size=(90, 3)).astype(np.float32)
+    target_return = (x[:, 0] * 0.01).astype(np.float32)
+    target_class = np.select(
+        [target_return < -0.0024, target_return > 0.0024],
+        [0, 2],
+        default=1,
+    ).astype(int)
+    ensemble = JointEnsemble.create(
+        family="hist_gradient_boosting",
+        config=config,
+        feature_names=("a", "b", "c"),
+        params={"max_iter": 10, "max_leaf_nodes": 7, "min_samples_leaf": 5},
+    )
+    ensemble.fit(x, target_return, target_class, np.arange(70))
+    classes = ensemble.predict_class_members(x, np.arange(70, 90))
+    assert classes.shape == (5, 20, 3)
+    assert np.allclose(classes.sum(axis=2), 1.0)

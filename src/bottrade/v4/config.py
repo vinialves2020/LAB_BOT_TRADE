@@ -27,6 +27,7 @@ class V4Config:
     max_holding_hours: int = 12
     exit_on_non_positive: bool = False
     normalized_return_target: bool = False
+    classification_mode: str = "binary"
     round_trip_bps: float = 24.0
     stress_multiplier: float = 2.0
     entry_margins_bps: tuple[int, ...] = (0, 5, 10, 20, 30)
@@ -69,6 +70,8 @@ class V4Config:
             raise ValueError("costs and margins cannot be negative")
         if not self.uncertainty_std_multiplier >= 0:
             raise ValueError("uncertainty_std_multiplier cannot be negative")
+        if self.classification_mode not in {"binary", "ordinal"}:
+            raise ValueError("classification_mode must be binary or ordinal")
         return self
 
 
@@ -114,6 +117,7 @@ def load_v4_config(path: str | Path = "config/v4.yaml") -> V4Config:
         normalized_return_target=bool(
             model.get("normalized_return_target", defaults.normalized_return_target)
         ),
+        classification_mode=str(model.get("classification_mode", defaults.classification_mode)),
         round_trip_bps=float(costs.get("round_trip_bps", defaults.round_trip_bps)),
         stress_multiplier=float(costs.get("stress_multiplier", defaults.stress_multiplier)),
         entry_margins_bps=tuple(
