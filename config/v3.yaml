@@ -28,8 +28,8 @@ event_labels:
   stop_loss_vol_multiplier: 1.0
 
 meta_policy:
-  probability_thresholds: [0.55, 0.60]
-  margin_bps: [0, 10, 20]
+  probability_thresholds: [0.50, 0.55, 0.60]
+  margin_bps: [0, 5, 10, 20, 30]
 
 search:
   random_forest_trials: 8

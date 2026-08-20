@@ -75,6 +75,17 @@ Esse conjunto é evidência operacional forte de que o gate/política não encon
 operações no braço atual, mas não substitui um ensemble RF completo nem autoriza
 conclusão estatística sobre a família.
 
+### Auditoria do grid de política
+
+O diagnóstico posterior encontrou uma divergência: `config/v3.yaml` usava
+probabilidades `[0,55; 0,60]` e margens `[0; 10; 20]`, embora o protocolo
+solicitado definisse `[0,50; 0,55; 0,60]` e `[0; 5; 10; 20; 30]`. Nos bundles
+disponíveis, as probabilidades calibradas ficaram abaixo de `0,50` no HGB e
+abaixo de `0,48` no RF. Portanto, a política bloqueava todas as entradas antes
+de avaliar o retorno previsto. A grade foi corrigida no código e no YAML; os
+treinos anteriores permanecem diagnósticos inconclusivos e não podem ser usados
+para declarar falha definitiva do modelo.
+
 ## Decisão
 
 BTC, ETH e SOL permanecem em caixa. O HGB de BTC não é promovido e não autoriza

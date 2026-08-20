@@ -47,6 +47,11 @@ incompletos e amostras que cruzam o holdout são inválidos.
 
 ## Gates
 
+Na calibração, a política testa probabilidade líquida mínima `0,50`, `0,55` e
+`0,60`, combinada com margens de retorno líquido `0`, `5`, `10`, `20` e `30`
+bps. Essa grade é fixa antes do holdout; ela não pode ser reduzida para
+fabricar frequência nem ampliada depois de observar resultados.
+
 O portfólio precisa ser líquido positivo com custos 1× e 2×, Sharpe HAC ≥ 1,
 intervalo inferior do Sharpe positivo, profit factor ≥ 1,2, drawdown ≤ 8%,
 DSR ≥ 0,95, PBO ≤ 0,20 e estabilidade em folds e seeds. Os mesmos sinais são

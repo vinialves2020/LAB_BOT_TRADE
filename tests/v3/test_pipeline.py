@@ -30,6 +30,12 @@ def test_preholdout_filters_rows_and_keeps_manifest(tmp_path) -> None:
     assert manifest["holdout_safe"] is True
 
 
+def test_v3_policy_grid_matches_preregistered_protocol() -> None:
+    config = load_v3_config("config/v3.yaml")
+    assert config.probability_thresholds == (0.50, 0.55, 0.60)
+    assert config.margin_bps == (0, 5, 10, 20, 30)
+
+
 def test_transformer_sequences_are_causal_and_gap_aware() -> None:
     times = pd.date_range("2024-01-01", periods=170, freq="1h", tz="UTC")
     features = pd.DataFrame(

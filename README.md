@@ -179,6 +179,7 @@ O dashboard fica em `http://localhost:8501`. O compose não agenda jobs automati
 - [Critérios de aceite V3](docs/ACCEPTANCE_V3.md)
 - [Estado de implementação V3](docs/V3_PROGRESS.md)
 - [Resultados V3 pré-holdout](docs/RESULTS_V3_PREHOLDOUT.md)
+- [Diagnóstico V3 de sinal e gate](docs/DIAGNOSTIC_V3_GATE.md)
 
 ## Limitações explícitas
 

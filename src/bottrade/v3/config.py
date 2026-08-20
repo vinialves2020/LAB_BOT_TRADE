@@ -36,8 +36,8 @@ class V3Config:
     lookback_hours: int = 168
     horizons: tuple[int, ...] = (3, 6, 12)
     max_variants_per_family: int = 12
-    probability_thresholds: tuple[float, ...] = (0.55, 0.60)
-    margin_bps: tuple[int, ...] = (0, 10, 20)
+    probability_thresholds: tuple[float, ...] = (0.50, 0.55, 0.60)
+    margin_bps: tuple[int, ...] = (0, 5, 10, 20, 30)
     take_profit_vol_multiplier: float = 0.75
     stop_loss_vol_multiplier: float = 1.0
     fallback_fee_bps_per_leg: float = 10.0

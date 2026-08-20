@@ -49,6 +49,16 @@ foi encerrada antes das seeds 53/71 por decisão do usuário. O CLI agora suport
 faltantes; o estado incompleto foi registrado em
 `reports/generated/v3/BTCUSDT/rf_official_retry_01/INTERRUPTED.json`.
 
+Auditoria de política identificou e corrigiu a omissão do threshold `0,50` e
+das margens de `5` e `30` bps na configuração V3. Como os modelos anteriores
+foram executados com essa grade incompleta, seus zeros trades são evidência de
+gate excessivo, não uma conclusão final sobre RF/HGB.
+
+O diagnóstico também mostrou concentração de 94,3% dos candidatos em tendência
+e probabilidades calibradas máximas abaixo de 0,50 nos bundles existentes. O
+relatório [DIAGNOSTIC_V3_GATE.md](DIAGNOSTIC_V3_GATE.md) congela a decisão de
+não abrir holdout e lista a próxima rodada de avaliação por família.
+
 ## Próximo passo seguro
 
 1. Regerar features/candidatos/labels para ETHUSDT e SOLUSDT.
