@@ -45,7 +45,7 @@ def _normalise_market(frame: pd.DataFrame) -> pd.DataFrame:
     return data.sort_values("open_time").drop_duplicates("open_time", keep="last").reset_index(drop=True)
 
 
-def _relative_features(frame: pd.DataFrame) -> pd.DataFrame:
+def _relative_features(frame: pd.DataFrame, *, stationary: bool = False) -> pd.DataFrame:
     """Turn absolute prices in the reusable V3 builder into causal ratios."""
 
     result = frame.copy()
@@ -61,6 +61,33 @@ def _relative_features(frame: pd.DataFrame) -> pd.DataFrame:
             result[f"close_to_{high_name}"] = close / _numeric(result, high_name) - 1.0
         if low_name in result:
             result[f"close_to_{low_name}"] = close / _numeric(result, low_name) - 1.0
+    if stationary:
+        # Activity fields are useful, but their absolute scale drifts as the
+        # market grows.  Keep causal log transforms and signed imbalances while
+        # removing their raw counterparts below.  All denominators are guarded
+        # so a malformed/empty candle becomes NaN and is handled by XGBoost's
+        # missing-value branch rather than being imputed.
+        for column in (
+            "volume",
+            "quote_volume",
+            "trade_count",
+            "taker_buy_base_volume",
+            "intrahour_volume",
+            "intrahour_trade_count",
+        ):
+            if column in result:
+                result[f"log1p_{column}"] = np.log1p(_numeric(result, column).clip(lower=0.0))
+        if "taker_buy_ratio" in result:
+            result["taker_buy_imbalance"] = 2.0 * _numeric(result, "taker_buy_ratio") - 1.0
+        if "intrahour_taker_ratio" in result:
+            result["intrahour_taker_imbalance"] = (
+                2.0 * _numeric(result, "intrahour_taker_ratio") - 1.0
+            )
+        vol_168 = _numeric(result, "volatility_168h").replace(0.0, np.nan)
+        for horizon in (6, 24, 72):
+            name = f"volatility_{horizon}h"
+            if name in result:
+                result[f"volatility_ratio_{horizon}h_168h"] = _numeric(result, name) / vol_168
     # Absolute price columns are not useful to a per-asset model and would make
     # the schema needlessly asset-specific.  The ratios above preserve their
     # information without changing the point-in-time timestamp.
@@ -87,6 +114,17 @@ def _relative_features(frame: pd.DataFrame) -> pd.DataFrame:
         # feature, so live inference cannot accidentally receive future data.
         "continuity_valid",
     }
+    if stationary:
+        drop.update(
+            {
+                "volume",
+                "quote_volume",
+                "trade_count",
+                "taker_buy_base_volume",
+                "intrahour_volume",
+                "intrahour_trade_count",
+            }
+        )
     return result.drop(columns=drop.intersection(result.columns), errors="ignore")
 
 
@@ -119,7 +157,7 @@ def build_features(
         include_intrahour=config.include_intrahour_15m,
     )
     built = built.sort_values("as_of").drop_duplicates("as_of", keep="last").reset_index(drop=True)
-    relative = _relative_features(built)
+    relative = _relative_features(built, stationary=config.stationary_features)
     numeric = relative.select_dtypes(include=[np.number]).copy()
     numeric = numeric.replace([np.inf, -np.inf], np.nan)
     # Explicit completeness columns are kept as model inputs, while the label

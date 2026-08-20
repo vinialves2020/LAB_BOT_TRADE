@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -180,6 +180,7 @@ def select_stateful_trades(
                 not valid
                 or held_hours >= config.max_holding_hours
                 or effective < -threshold
+                or (config.exit_on_non_positive and effective <= 0.0)
             )
             if should_exit:
                 close_position(entry_time, float(row.entry_price), prediction)
@@ -315,6 +316,9 @@ def run_walk_forward(
     config: V4Config,
     params: dict[str, Any] | None = None,
     max_folds: int | None = None,
+    seeds_override: tuple[int, ...] | None = None,
+    fold_selection: Literal["last", "first"] = "last",
+    evaluation_split: Literal["test", "calibration"] = "test",
 ) -> WalkForwardResult:
     frame = _valid_frame(dataset)
     if frame.empty:
@@ -333,7 +337,16 @@ def run_walk_forward(
         require_minimum_folds(folds, config.minimum_pre_holdout_folds)
     elif max_folds < 1:
         raise ValueError("max_folds must be positive")
-    selected_folds = folds if max_folds is None else folds[-max_folds:]
+    if fold_selection not in {"last", "first"}:
+        raise ValueError("fold_selection must be 'last' or 'first'")
+    if evaluation_split not in {"test", "calibration"}:
+        raise ValueError("evaluation_split must be 'test' or 'calibration'")
+    if max_folds is None:
+        selected_folds = folds
+    elif fold_selection == "first":
+        selected_folds = folds[:max_folds]
+    else:
+        selected_folds = folds[-max_folds:]
     x = frame[list(dataset.feature_columns)].to_numpy(dtype=np.float32)
     y = frame[dataset.target_column].to_numpy(dtype=np.float32)
     results: list[FoldResult] = []
@@ -345,6 +358,7 @@ def run_walk_forward(
             config=config,
             feature_names=dataset.feature_columns,
             params=params,
+            seeds=seeds_override,
         )
         ensemble.fit(x, y, fold.train_indices)
         calibration_mean, calibration_std = ensemble.predict_summary(x, fold.calibration_indices)
@@ -369,19 +383,29 @@ def run_walk_forward(
         test_mean = calibrator.transform(test_mean)
         test_std = np.abs(calibrator.slope) * test_std
         test_frame = frame.iloc[fold.test_indices].reset_index(drop=True)
+        if evaluation_split == "calibration":
+            evaluation_mean = calibration_mean
+            evaluation_std = calibration_std
+            evaluation_frame = calibration_frame
+            evaluation_indices = fold.calibration_indices
+        else:
+            evaluation_mean = test_mean
+            evaluation_std = test_std
+            evaluation_frame = test_frame
+            evaluation_indices = fold.test_indices
         trades = select_trades(
-            test_frame,
-            test_mean,
-            test_std,
+            evaluation_frame,
+            evaluation_mean,
+            evaluation_std,
             config=config,
             policy=policy,
             cost_multiplier=1.0,
         )
         metrics = summarize_trades(trades)
         stress_trades = select_trades(
-            test_frame,
-            test_mean,
-            test_std,
+            evaluation_frame,
+            evaluation_mean,
+            evaluation_std,
             config=config,
             policy=policy,
             cost_multiplier=config.stress_multiplier,
@@ -390,11 +414,11 @@ def run_walk_forward(
             {f"stress_{key}": value for key, value in summarize_trades(stress_trades).items()}
         )
         seed_metrics: dict[str, dict[str, float | int]] = {}
-        member_predictions = ensemble.predict_members(x, fold.test_indices)
+        member_predictions = ensemble.predict_members(x, evaluation_indices)
         for seed, member_prediction in zip(ensemble.seeds, member_predictions, strict=True):
             member_prediction = calibrator.transform(member_prediction)
             member_trades = select_trades(
-                test_frame,
+                evaluation_frame,
                 member_prediction,
                 np.zeros(len(member_prediction), dtype=float),
                 config=config,

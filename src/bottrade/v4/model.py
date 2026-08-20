@@ -52,6 +52,7 @@ class XGBEnsemble:
         config: V4Config,
         feature_names: tuple[str, ...],
         params: dict[str, Any] | None = None,
+        seeds: tuple[int, ...] | None = None,
     ) -> XGBEnsemble:
         merged = dict(DEFAULT_XGB_PARAMS)
         merged.update(params or {})
@@ -60,7 +61,7 @@ class XGBEnsemble:
         merged["device"] = config.device
         return cls(
             params=merged,
-            seeds=tuple(config.seeds),
+            seeds=tuple(config.seeds if seeds is None else seeds),
             feature_names=tuple(feature_names),
             members=[],
         )

@@ -25,6 +25,7 @@ class V4Config:
     calibrate_return_scale: bool = False
     stateful_hourly: bool = False
     max_holding_hours: int = 12
+    exit_on_non_positive: bool = False
     round_trip_bps: float = 24.0
     stress_multiplier: float = 2.0
     entry_margins_bps: tuple[int, ...] = (0, 5, 10, 20, 30)
@@ -45,6 +46,10 @@ class V4Config:
     include_onchain: bool = False
     include_sentiment: bool = False
     feature_schema_version: str = "v4-xgb-market-1h-15m"
+    # V4.2 uses stationary transforms for scale-sensitive activity fields.
+    # Keeping this explicit makes the feature change auditable and prevents a
+    # refined run from being mistaken for the V4.1 baseline.
+    stationary_features: bool = False
 
     def validate(self) -> V4Config:
         if self.timezone != "UTC":
@@ -84,6 +89,7 @@ def load_v4_config(path: str | Path = "config/v4.yaml") -> V4Config:
     gates = _section(raw, "gates")
     data = _section(raw, "data")
     result = V4Config(
+        protocol_version=str(project.get("protocol_version", defaults.protocol_version)),
         timezone=str(project.get("timezone", defaults.timezone)),
         holdout_start=str(project.get("holdout_start", defaults.holdout_start)),
         holdout_end=str(project.get("holdout_end", defaults.holdout_end)),
@@ -103,6 +109,7 @@ def load_v4_config(path: str | Path = "config/v4.yaml") -> V4Config:
         ),
         stateful_hourly=bool(model.get("stateful_hourly", defaults.stateful_hourly)),
         max_holding_hours=int(model.get("max_holding_hours", defaults.max_holding_hours)),
+        exit_on_non_positive=bool(model.get("exit_on_non_positive", defaults.exit_on_non_positive)),
         round_trip_bps=float(costs.get("round_trip_bps", defaults.round_trip_bps)),
         stress_multiplier=float(costs.get("stress_multiplier", defaults.stress_multiplier)),
         entry_margins_bps=tuple(
@@ -150,6 +157,9 @@ def load_v4_config(path: str | Path = "config/v4.yaml") -> V4Config:
         include_sentiment=bool(data.get("include_sentiment", defaults.include_sentiment)),
         feature_schema_version=str(
             data.get("feature_schema_version", defaults.feature_schema_version)
+        ),
+        stationary_features=bool(
+            data.get("stationary_features", defaults.stationary_features)
         ),
     )
     return result.validate()

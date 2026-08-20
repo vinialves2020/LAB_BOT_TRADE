@@ -70,6 +70,24 @@ def test_v4_feature_schema_excludes_lookahead_validity_mask() -> None:
     assert features["as_of"].is_monotonic_increasing
 
 
+def test_v4_stationary_features_transform_activity_scale() -> None:
+    from dataclasses import replace
+
+    config = replace(load_v4_config(), stationary_features=True)
+    market = {asset.value: _market() for asset in Asset}
+    intra = {asset.value: _intrahour() for asset in Asset}
+    features = build_features(
+        asset=Asset.BTCUSDT,
+        market=market,
+        intrahour=intra,
+        config=config,
+    )
+    assert "volume" not in features.columns
+    assert "log1p_volume" in features.columns
+    assert "taker_buy_imbalance" in features.columns
+    assert "volatility_ratio_24h_168h" in features.columns
+
+
 def test_v4_direct_label_uses_next_open_and_exact_12h_close() -> None:
     config = load_v4_config()
     market = {asset.value: _market() for asset in Asset}
@@ -217,3 +235,35 @@ def test_v4_stateful_hourly_policy_closes_on_negative_forecast() -> None:
     assert len(trades) == 1
     assert trades.iloc[0]["entry_price"] == 100.0
     assert trades.iloc[0]["exit_price"] == 102.0
+
+
+def test_v4_stateful_policy_can_exit_on_non_positive_forecast() -> None:
+    from dataclasses import replace
+
+    config = replace(
+        load_v4_config(),
+        stateful_hourly=True,
+        horizon_hours=1,
+        exit_on_non_positive=True,
+    )
+    times = pd.date_range("2024-01-01", periods=4, freq="1h", tz="UTC")
+    frame = pd.DataFrame(
+        {
+            "as_of": times,
+            "entry_time": times,
+            "exit_time": times,
+            "entry_price": [100.0, 101.0, 100.0, 100.0],
+            "exit_price": [101.0, 100.0, 100.0, 100.0],
+            "gross_return": [0.01, -0.01, 0.0, 0.0],
+            "label_valid": [True, True, True, True],
+        }
+    )
+    trades = select_stateful_trades(
+        frame,
+        np.array([0.004, 0.0, 0.0, 0.0]),
+        np.zeros(4),
+        config=config,
+        policy=Policy(0),
+    )
+    assert len(trades) == 1
+    assert trades.iloc[0]["exit_price"] == 101.0
