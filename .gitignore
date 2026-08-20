@@ -18,6 +18,7 @@ artifacts/experiments/
 artifacts/refits/
 artifacts/registry/
 artifacts/logs/
+artifacts/v4/
 reports/generated/
 *.db
 *.sqlite

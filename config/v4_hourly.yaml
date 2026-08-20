@@ -1,0 +1,46 @@
+project:
+  timezone: UTC
+  holdout_start: "2025-08-01T00:00:00Z"
+  holdout_end: "2026-07-31T23:59:59Z"
+
+model:
+  family: xgboost
+  horizon_hours: 1
+  lookback_hours: 168
+  seeds: [11, 23, 37, 53, 71]
+  objective: reg:squarederror
+  device: cpu
+  tree_method: hist
+  max_trials: 20
+  uncertainty_std_multiplier: 0.0
+  calibrate_return_scale: false
+  stateful_hourly: true
+  max_holding_hours: 12
+
+costs:
+  round_trip_bps: 24.0
+  stress_multiplier: 2.0
+  entry_margins_bps: [0, 5, 10, 20, 30]
+
+validation:
+  train_months: 24
+  calibration_months: 3
+  test_months: 1
+  purge_hours: 12
+  minimum_pre_holdout_folds: 12
+  max_round_trips_per_asset_day: 2
+  minimum_calibration_trades: 20
+
+gates:
+  minimum_average_monthly_trades_portfolio: 20
+  minimum_calibration_trades_portfolio: 60
+  minimum_sharpe: 1.0
+  minimum_profit_factor: 1.2
+  maximum_drawdown: 0.08
+
+data:
+  include_intrahour_15m: true
+  include_derivatives: false
+  include_onchain: false
+  include_sentiment: false
+  feature_schema_version: v4-xgb-hourly-market-1h-15m
