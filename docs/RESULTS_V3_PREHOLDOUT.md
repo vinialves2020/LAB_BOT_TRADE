@@ -67,6 +67,14 @@ necessário escolher explicitamente entre uma janela computacional maior ou um
 orçamento RF congelado e pré-registrado; não se deve aproveitar qualquer saída
 parcial.
 
+Uma segunda execução persistiu as seeds 11, 23 e 37, cada uma com 32 folds,
+zero trades e retorno líquido zero. A retomada das seeds 53 e 71 foi encerrada
+por decisão do usuário diante da repetição do sinal nulo e do custo de CPU; o
+registro está em `reports/generated/v3/BTCUSDT/rf_official_retry_01/INTERRUPTED.json`.
+Esse conjunto é evidência operacional forte de que o gate/política não encontra
+operações no braço atual, mas não substitui um ensemble RF completo nem autoriza
+conclusão estatística sobre a família.
+
 ## Decisão
 
 BTC, ETH e SOL permanecem em caixa. O HGB de BTC não é promovido e não autoriza

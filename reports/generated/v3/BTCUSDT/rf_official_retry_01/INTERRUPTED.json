@@ -1,0 +1,21 @@
+{
+  "status": "interrupted",
+  "reason": "user_requested_stop_after_repeated_zero_trade_seeds",
+  "asset": "BTCUSDT",
+  "family": "random_forest",
+  "arm": "market_1h_15m",
+  "rows": 42514,
+  "features": 93,
+  "folds_per_seed": 32,
+  "seeds_completed": [11, 23, 37],
+  "seeds_missing": [53, 71],
+  "completed_seed_metrics": {
+    "closed_trades": 0,
+    "total_return": 0.0,
+    "sharpe_hac": 0.0,
+    "max_drawdown": 0.0
+  },
+  "metrics_valid_for_promotion": false,
+  "holdout_claimed": false,
+  "note": "The user stopped the pending resume after the repeated zero-trade evidence and excessive compute time. Missing seeds were not imputed."
+}

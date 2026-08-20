@@ -314,6 +314,7 @@ def meta_train(
     seeds: Annotated[str | None, typer.Option("--seeds", help="Lista; padrão são as cinco seeds V3.")] = None,
     development_end: Annotated[str | None, typer.Option("--development-end")] = None,
     params_json: Annotated[str | None, typer.Option("--params-json", help="JSON de hiperparâmetros congelados.")] = None,
+    resume: Annotated[bool, typer.Option("--resume", help="Retoma somente seeds sem registro válido no ledger.")] = False,
 ) -> None:
     """Run gap-aware walk-forward and fit the five-member pre-holdout ensemble."""
 
@@ -343,8 +344,36 @@ def meta_train(
     if params is not None and not isinstance(params, dict):
         raise typer.BadParameter("params-json deve ser um objeto JSON")
     output_dir.mkdir(parents=True, exist_ok=True)
-    ledger = TrialLedger(output_dir / "trial_ledger.jsonl")
+    ledger_path = output_dir / "trial_ledger.jsonl"
+    ledger = TrialLedger(ledger_path)
     summaries: list[dict[str, Any]] = []
+    completed_seeds: set[int] = set()
+    if resume and ledger_path.exists():
+        for line in ledger_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            if (
+                record.get("stage") == "pre_holdout"
+                and record.get("asset") == target.value
+                and record.get("family") == family
+                and isinstance(record.get("seed"), int)
+                and isinstance(record.get("metrics"), dict)
+            ):
+                seed = int(record["seed"])
+                member_dir = output_dir / f"seed_{seed}"
+                if not (member_dir / "bundle.joblib").exists():
+                    continue
+                completed_seeds.add(seed)
+                summaries.append(
+                    {
+                        "seed": seed,
+                        "folds": int(record.get("folds", 0)),
+                        **record["metrics"],
+                        "artifact": record.get("artifact", str(member_dir)),
+                    }
+                )
+        seed_values = tuple(seed for seed in seed_values if seed not in completed_seeds)
     for seed in seed_values:
         result = walk_forward_meta_experiment(
             table,
@@ -391,6 +420,7 @@ def meta_train(
             }
         )
         summaries.append({"seed": seed, "folds": len(result.folds), **result.metrics, "artifact": str(member_dir)})
+    summaries.sort(key=lambda item: int(item["seed"]))
     _emit(
         {"family": family, "asset": target.value, "rows": len(table), "features": len(feature_columns), "members": summaries},
         output_dir / "metrics.json",

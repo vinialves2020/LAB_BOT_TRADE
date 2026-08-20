@@ -43,6 +43,12 @@ minutos de parede por custo computacional; nenhuma seed terminou e não há
 métrica válida. A retomada exige uma decisão explícita de orçamento, registrada
 antes de novo treino.
 
+Uma retomada posterior concluiu as seeds 11, 23 e 37 (todas com zero trades) e
+foi encerrada antes das seeds 53/71 por decisão do usuário. O CLI agora suporta
+`meta-train --resume`, que preserva bundles/ledger válidos e treina apenas seeds
+faltantes; o estado incompleto foi registrado em
+`reports/generated/v3/BTCUSDT/rf_official_retry_01/INTERRUPTED.json`.
+
 ## Próximo passo seguro
 
 1. Regerar features/candidatos/labels para ETHUSDT e SOLUSDT.
