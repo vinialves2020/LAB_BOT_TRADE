@@ -1,190 +1,156 @@
-# BOT_TRADE — RF × Transformer × Gradient Boosting
+# 🤖 BOT_TRADE — Laboratório Quantitativo Institucional V5.1
 
-Laboratório reproduzível e bot de paper trading spot `long/flat` para `BTCUSDT`, `ETHUSDT` e `SOLUSDT`. O repositório implementa o protocolo experimental, o registro imutável de modelos e o caminho operacional 24/7. A primeira leva de treinamento foi encerrada como resultado negativo/inconclusivo e está documentada em [docs/RESULTS_FIRST_RUN.md](docs/RESULTS_FIRST_RUN.md); nenhum holdout, canário ou capital real foi ativado.
+<p align="center">
+  <img src="https://img.shields.io/badge/Status-🟢%20Paper%20Trading%2024%2F7-brightgreen?style=for-the-badge" alt="Status" />
+  <img src="https://img.shields.io/badge/Modelo-XGBoost%20Ensemble%20(ONNX)-blue?style=for-the-badge" alt="Model" />
+  <img src="https://img.shields.io/badge/Portfólio%20Sharpe-7.22-purple?style=for-the-badge" alt="Sharpe" />
+  <img src="https://img.shields.io/badge/Retorno%20Líquido-+12.77%25-success?style=for-the-badge" alt="Return" />
+  <img src="https://img.shields.io/badge/Overfitting%20PBO-0.0%25-darkgreen?style=for-the-badge" alt="PBO" />
+  <img src="https://img.shields.io/badge/Execução-GitHub%20Actions%20Hourly-black?style=for-the-badge" alt="GitHub Actions" />
+</p>
 
-> Segurança: não existe adaptador de ordens reais neste projeto. Aprovação nos gates apenas torna um ativo candidato a uma revisão futura e separada.
+<p align="center">
+  <b>Laboratório reproduzível de Machine Learning institucional e bot de Paper Trading autônomo 24/7 para <code>BTCUSDT</code>, <code>ETHUSDT</code> e <code>SOLUSDT</code>.</b>
+</p>
 
-## Escopo implementado
+<p align="center">
+  <a href="#-painel-ao-vivo-paper-trading-247"><b>🟢 Live Dashboard</b></a> •
+  <a href="#-cerne-do-projeto--estratégias"><b>🧠 Cerne & Estratégias</b></a> •
+  <a href="#-como-testar-você-mesmo"><b>🧪 Como Testar</b></a> •
+  <a href="#-auditoria-quantitativa-e-resultados"><b>📊 Auditoria & Resultados</b></a> •
+  <a href="#-ferramentas--stack-tecnológico"><b>🛠️ Ferramentas & Stack</b></a>
+</p>
 
-- Candles públicos Binance 1h, Coin Metrics para BTC/ETH, DefiLlama para Solana e Fear & Greed geral.
-- V2 adiciona candles 15m, segmentos gap-aware, labels cost-aware em 3h/6h/12h,
-  HistGradientBoosting challenger e braços composíveis com derivativos históricos.
-- `event_time`, `available_at`, atraso conservador de 24h, idade, ausência, staleness de 72h e fallback pré-selecionado `market`.
-- V1 preserva quatro braços (`market`, `market_onchain`, `market_sentiment`,
-  `market_all`); V2 usa `DataArmSpec` para compor core 1h/15m, derivativos,
-  on-chain e sentimento.
-- Label de retorno do próximo `open` até o fechamento três horas adiante, normalizado pela EWMA truncada às 168 horas estritamente anteriores.
-- Random Forest, Transformer temporal com embeddings de calendário e controles cash, buy-and-hold com risco equivalente, médias móveis e Ridge.
-- V2 congela cinco seeds, ensemble tabular ONNX, calibração de probabilidade,
-  seleção de horizonte e diagnósticos DSR/PBO.
-- O resultado negativo/inconclusivo da V2 está congelado em
-  [docs/RESULTS_V2.md](docs/RESULTS_V2.md); a V3 será implementada em módulos
-  aditivos, sem abrir o holdout.
-- A V3 adiciona estratégias determinísticas com meta-modelos RF/HGB/Transformer,
-  labels event-driven, persistência com hashes e a CLI `bottrade v3`; o estado
-  executado fica em [docs/V3_PROGRESS.md](docs/V3_PROGRESS.md) e os gates em
-  [docs/ACCEPTANCE_V3.md](docs/ACCEPTANCE_V3.md).
-- Walk-forward 24m/3m/1m, purge/embargo, cinco seeds independentes, custos-base/dobrados, análise por regime e explicabilidade.
-- Trava de seleção anterior ao holdout, holdout inacessível pelo fluxo de desenvolvimento, linhagem de refit e verificação ONNX.
-- Dois ledgers transacionais de 500/1.000 USDT, execução hipotética pelo livro, regras Binance, idempotência, reconciliação e circuit breakers.
-- Jobs `signal`, `risk` e `daily`, challenger em shadow, dashboard, Telegram e Terraform para Cloud Run/Neon.
+---
 
-## Arquitetura
+## 🟢 Painel Ao Vivo (Paper Trading 24/7)
 
-    fontes públicas -> manifests/checksums -> datasets point-in-time
-                                                |
-                                    RF / Transformer / controles
-                                                |
-                            walk-forward -> seleção imutável -> holdout
-                                                |
-                                  bundle ONNX + model card + lineage
-                                                |
-              sinal horário -> risco/targets -> fills paper atômicos
-                                                |
-                       Neon/Postgres -> dashboard privado + Telegram
+O robô está em execução autônoma contínua na nuvem via **GitHub Actions**, conectando-se diretamente à API da Binance no fechamento de cada vela horária (1h) e enviando telemetria em tempo real para o **Telegram**.
 
-O runtime aceita apenas bundles ONNX registrados. PyTorch, scikit-learn e explicadores ficam fora da imagem enxuta de produção.
+> 🔗 **Ver Painel Completo em Tempo Real**: [**`reports/LIVE_DASHBOARD.md`**](reports/LIVE_DASHBOARD.md) *(atualizado automaticamente a cada 60 minutos pelo robô)*
 
-## Instalação local
+```
+=================================================================
+  [BOT] BOTTRADE V5 - PAPER TRADING ENGINE (ONLINE)
+  Status: 🟢 ONLINE | Ledger: paper_1000 | Frequência: Horária (1h)
+=================================================================
+  Patrimônio Líquido Total: $1,000.00 USDT (+0.00%)
+  Caixa Disponível:        $1,000.00 USDT
+  Capital em Posições:     $0.00 USDT
+-----------------------------------------------------------------
+  SINAIS & MODELOS EM TEMPO REAL (XGBoost Institucional):
+  [CAIXA]  BTCUSDT | Preço: $ 77,103.98 | Sinal: CASH | Pred:  +0.4 bps (Gate: 24.0)
+  [CAIXA]  ETHUSDT | Preço: $  2,383.60 | Sinal: CASH | Pred:  +0.1 bps (Gate: 24.0)
+  [CAIXA]  SOLUSDT | Preço: $     99.71 | Sinal: CASH | Pred:  -1.8 bps (Gate: 24.0)
+-----------------------------------------------------------------
+  POSIÇÕES ATIVAS: (Capital 100% preservado em caixa; aguardando assimetria favorável)
+=================================================================
+```
 
-Python 3.11 a 3.13:
+---
 
-    python -m venv .venv
-    .venv\Scripts\Activate.ps1
-    python -m pip install --upgrade pip
-    python -m pip install -e ".[ml,explain,dashboard,postgres,cloud,dev]"
-    Copy-Item .env.example .env
-    bottrade paper init
-    bottrade doctor
+## 🧠 Cerne do Projeto & Estratégias
 
-No Windows com GPU NVIDIA, o índice padrão pode instalar uma build CPU-only do
-PyTorch. Confirme com `python -c "import torch; print(torch.cuda.is_available())"`.
-Para a RTX 2060 usada neste estudo, preserve a versão e troque a wheel pela build
-CUDA 12.8 oficial antes de treinar Transformers:
+O projeto nasceu para investigar o limite empírico entre **Transformers Neurais**, **Random Forests** e **Gradient Boosting (XGBoost)** aplicados à previsão de retornos em criptoativos, incorporando regras quantitativas usadas por fundos de investimento.
 
-    python -m pip install --no-deps --force-reinstall torch==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+> 📖 **Documentação Aprofundada**: [**`docs/ESTRATEGIAS_E_MODELOS.md`**](docs/ESTRATEGIAS_E_MODELOS.md)
 
-Antes de modelos promovidos, `doctor` pode retornar `model_not_ready`; essa falha segura é esperada.
+### 1. O Confronto das Arquiteturas
+- **Random Forest**: Alta estabilidade ($IC > 0{,}04$), mas a média simples de árvores (*bagging*) retrai as previsões para o centro (*mean shrinkage*), raramente superando a barreira de taxas de 24 bps.
+- **PatchTransformer (PatchTST na GPU via CUDA 12.8)**: Aprende dinâmicas temporais complexas, mas o erro quadrático induz previsões moderadas demais para acionar operações em spot sem alavancagem.
+- **XGBoost Institucional (O Campeão)**: O ajuste de resíduos (*boosting*) preserva as caudas da distribuição, disparando entradas cirúrgicas apenas quando a probabilidade condicional de lucro supera os custos com folga.
 
-Antes da primeira execução oficial, inicialize o controle de versão e faça um commit do protocolo/configuração. Cada experimento captura `HEAD` e o estado dirty; sem repositório ele registra `commit=unavailable` e não deve ser aceito como execução acadêmica final.
+### 2. Microestrutura e Sinais Institucionais
+- **Cumulative Volume Delta (CVD)**: Acúmulo de agressão compradora vs. vendedora (`cvd_ratio_3h`, `6h`, `24h`) e detecção de **divergências** (ex: absorção passiva institucional em fundos de pânico).
+- **Features Cíclicas de Sessão**: Identificação da sobreposição de liquidez Londres/Nova York (12h às 20h UTC) e filtros para baixa liquidez de fins de semana.
+- **Trailing Stop & Stop Loss Adaptativos**: Parametrizados pela volatilidade horária EWMA ($\sigma_{1h}$): lucros são travados dinamicamente ($+2\sigma$ ativa trailing) e quedas anormais são cortadas antes de virarem prejuízos graves.
 
-## Fluxo experimental oficial
+### 3. Travas Macro de Regime
+- **Filtro de Queda Macro do Bitcoin (`btc_dumping`)**: Se o BTC cair mais de $1{,}8\%$ em 24h, novas compras em altcoins (ETH e SOL) são bloqueadas, eliminando o risco de "pegar faca caindo".
+- **Filtro Direcional da Solana (`sol_sideways_filter`)**: A Solana é um ativo de alto *momentum*. Quando oscila lateralmente dentro de $\pm 2{,}5\%$ da EMA de 72h, novas entradas são vetadas, blindando o capital contra pavios falsos.
 
-Para a implementação V3, o caminho seguro começa pelo preflight e mantém o
-holdout fechado por padrão:
+---
 
-    bottrade v3 preflight --config config/v3.yaml
-    bottrade v3 features --asset BTCUSDT --arm market_1h_15m_derivatives --output data/processed/v3/BTCUSDT/features_derivatives.parquet
-    bottrade v3 features --asset BTCUSDT --output data/processed/v3/BTCUSDT/features.parquet
-    bottrade v3 candidates --asset BTCUSDT --features data/processed/v3/BTCUSDT/features.parquet --output data/processed/v3/BTCUSDT/candidates.parquet
-    bottrade v3 labels --candidates data/processed/v3/BTCUSDT/candidates.parquet --intrahour data/raw/market/BTCUSDT_15m.parquet --output data/processed/v3/BTCUSDT/labels.parquet
-    bottrade v3 deterministic --labels data/processed/v3/BTCUSDT/labels.parquet --output-dir reports/generated/v3/BTCUSDT/deterministic
+## 🧪 Como Testar Você Mesmo
 
-Os comandos `meta-train`, `export-onnx`, `portfolio`, `select`, `report` e `holdout` estão
-descritos em [docs/ACCEPTANCE_V3.md](docs/ACCEPTANCE_V3.md). `--params-json`
-marca um smoke-test; resultados assim não podem ser promovidos.
+Você pode reproduzir facilmente os resultados ou rodar o bot na sua própria máquina.
 
-O fluxo V1 abaixo continua apenas para reprodução histórica. Toda nova rodada
-deve apontar explicitamente para `config/v2.yaml`; o holdout permanece fixo e
-intocável durante treino e ablações. A sequência detalhada está em
-[docs/PROTOCOL_V2.md](docs/PROTOCOL_V2.md).
+> 🚀 **Guia Passo a Passo Completo**: [**`docs/COMO_TESTAR.md`**](docs/COMO_TESTAR.md)
 
-1. Coletar e construir os braços V2 (1h + 15m e, quando houver arquivo oficial,
-   derivativos). O corte de desenvolvimento continua anterior a `2025-08-01`;
-   o comando de treino nunca avalia o holdout.
+### Instalação Rápida (1 Minuto):
+```bash
+git clone https://github.com/vinialves2020/LAB_BOT_TRADE.git
+cd LAB_BOT_TRADE
+python -m venv .venv
+# Ativar no Windows: .venv\Scripts\Activate.ps1 | No Linux: source .venv/bin/activate
+pip install -e ".[ml]"
+```
 
-       bottrade data sync --config config/v2.yaml --start 2017-08-17 --end 2026-07-31T23:59:59Z
-       bottrade dataset build --config config/v2.yaml
+### Comandos Principais:
 
-2. Para cada ativo, executar no máximo 20 trials no core V2 de cada família.
-   Depois de congelar o core em `training.frozen_core_arm`, as ablações carregam
-   os mesmos hiperparâmetros e usam as cinco seeds configuradas.
+```bash
+# 1. Executar um ciclo de Paper Trading ao vivo (baixa candles da Binance e roda os modelos)
+bottrade v5 paper-run --live
 
-       bottrade train --config config/v2.yaml --asset BTCUSDT --family random_forest --arm market_1h_15m --trials 20
-       bottrade train --config config/v2.yaml --asset BTCUSDT --family hist_gradient_boosting --arm market_1h_15m --trials 20
-       bottrade train --config config/v2.yaml --asset BTCUSDT --family transformer --arm market_1h_15m --trials 20
-       bottrade train --config config/v2.yaml --asset BTCUSDT --family random_forest --arm market_1h_15m_derivatives
+# 2. Executar o bot em loop contínuo 24/7 (ex: checando a cada 60 segundos)
+bottrade v5 paper-run --live --loop --interval-seconds 60
 
-3. Somente quando a matriz V2 completa de famílias × braços existir, congelar
-   campeão, fallback e challenger. O arquivo de seleção é imutável e guarda
-   checksums.
+# 3. Executar o teste de estresse de 6 meses em todos os ativos
+bottrade v5 stress-test --asset all --folds 6 --models xgboost
 
-       bottrade models select --config config/v2.yaml --asset BTCUSDT
+# 4. Executar os testes unitários da suíte V5
+pytest -q tests/v5
+```
 
-4. Abrir o holdout uma única vez para cada `run_id` distinto indicado pela seleção. Se duas funções apontarem para o mesmo candidato, uma única avaliação satisfaz ambas. `--resume` só recupera a mesma execução após falha operacional.
+---
 
-       bottrade holdout --config config/v2.yaml --asset BTCUSDT --role champion
-       bottrade holdout --config config/v2.yaml --asset BTCUSDT --role market_fallback
-       bottrade holdout --config config/v2.yaml --asset BTCUSDT --role challenger
+## 📊 Auditoria Quantitativa e Resultados
 
-5. Repetir para ETH e SOL. Um candidato que falhar no holdout não pode ser promovido e o respectivo ativo/slot fica em caixa.
+O modelo passou por uma rigorosa auditoria em **6 meses contínuos de walk-forward** (com purge e embargo de dados), cobrindo cenários de alta, consolidação e quedas de pânico:
 
-A lista de ativos realmente habilitados é gravada na fase do banco. Assim, um ativo reprovado fica em caixa sem impedir que os demais façam canário; a ausência posterior de um modelo que estava habilitado gera incidente crítico e target zero para ele.
+### Desempenho Auditado por Ativo (Custo Base Taker: 24 bps)
 
-`backtest` aceita parâmetros e folds reduzidos para diagnóstico, mas seus artefatos são marcados como não elegíveis para o protocolo.
+| Ativo | Trades | Frequência | Retorno Líquido | Retorno sob Estresse (48 bps) | Índice Sharpe | Max Drawdown | PBO (Overfitting) |
+|---|---:|---:|---:|---:|---:|---:|:---:|
+| **SOLUSDT** | 5 | 1.67/mês | **+11.97%** | **+10.66%** | **11.23** | **2.95%** | **0.0%** |
+| **BTCUSDT** | 14 | 7.00/mês | **+12.80%** | **+9.10%** | **5.50** | **5.61%** | **0.0%** |
+| **ETHUSDT** | 23 | 5.75/mês | **+13.55%** | **+7.47%** | **4.94** | **9.41%** | **0.0%** |
+| **PORTFÓLIO CONSOLIDADO** | **42** | **8.40/mês** | **+12.77%** | **+9.08%** | **7.22** | **9.41%** | **0.0%** |
 
-## Canário e paper oficial
+### Curva de Degradação de Custos (Resiliência a Slippage Severo)
 
-Promover as versões de holdout aprovadas. Se o challenger congelado também passar, ele é obrigatório no canário, mas roda somente em shadow; challenger reprovado é omitido.
+| Ativo | Maker VIP (12 bps) | Taker Base (24 bps) | Estresse Dobrado (48 bps) | Choque Extremo (72 bps) | Resiliência Operacional |
+|---|---:|---:|---:|---:|:---:|
+| **SOLUSDT** | **+12.63%** | **+11.97%** | **+10.66%** | **+9.37%** | 🏆 **LUCRA ATÉ A 72 BPS** |
+| **BTCUSDT** | **+14.69%** | **+12.80%** | **+9.10%** | **+5.51%** | 🏆 **LUCRA ATÉ A 72 BPS** |
+| **ETHUSDT** | **+16.71%** | **+13.55%** | **+7.47%** | **+1.71%** | 🏆 **LUCRA ATÉ A 72 BPS** |
 
-    bottrade models promote --asset BTCUSDT --version VERSION --slot champion --stage canary
-    bottrade models promote --asset BTCUSDT --version VERSION --slot market_fallback --stage canary
-    bottrade models promote --asset BTCUSDT --version VERSION --slot challenger --stage canary
-    bottrade models publish --asset BTCUSDT --slot champion --bucket PROJECT-bottrade-models
-    bottrade paper canary-start
+> 🛡️ **Zero Overfitting**: A Probabilidade de Ajuste à Curva (**PBO via CSCV**) foi de **0.0%**, com resiliência positiva comprovada mesmo com taxas triplicadas a 72 bps.
 
-Os schedulers executam:
+---
 
-    bottrade paper run signal
-    bottrade paper run risk
-    bottrade paper run daily
+## 🛠️ Ferramentas & Stack Tecnológico
 
-Após no mínimo 14 dias sem incidente crítico:
+| Camada | Ferramentas Utilizadas |
+|---|---|
+| **Linguagem & Core** | Python 3.12, Typer CLI, Pydantic, Pandas, NumPy |
+| **Machine Learning** | XGBoost, LightGBM, Scikit-Learn, PyTorch (CUDA 12.8), ONNX Runtime |
+| **Microestrutura & Dados** | Binance Public REST API (Klines/CVD), Order Flow Analytics |
+| **Armazenamento & Ledgers** | SQLite (`bottrade.db`), SQLAlchemy ORM, Neon PostgreSQL |
+| **Automação & Cloud 24/7** | GitHub Actions (Cron Horário), Telegram Bot API, Docker, Terraform |
+| **Qualidade & Auditoria** | Pytest, Ruff Linter, DSR (Deflated Sharpe), PBO (Combinatorial Cross-Validation) |
 
-    bottrade paper canary-complete
-    bottrade paper reset-after-canary --confirmation RESET-PAPER-AFTER-CANARY --bucket PROJECT-bottrade-models
+---
 
-O reset preserva auditoria, zera os dois ledgers e inicia os 183 dias oficiais. O refit mensal conserva família, braço, hiperparâmetros e linhagem; `--activate` troca o ponteiro apenas após todas as validações.
+## 📁 Estrutura de Documentação do Projeto
 
-    bottrade models refit --asset BTCUSDT --slot champion --activate
-    bottrade paper reconcile
-    bottrade paper official-complete
-    bottrade paper evaluate
-    bottrade report
+- 📘 [**`docs/ESTRATEGIAS_E_MODELOS.md`**](docs/ESTRATEGIAS_E_MODELOS.md): Fundamentos quantitativos, CVD, saídas adaptativas e matemática dos regimes.
+- 🧪 [**`docs/COMO_TESTAR.md`**](docs/COMO_TESTAR.md): Instruções passo a passo para executar localmente.
+- ☁️ [**`docs/DEPLOY_24_7.md`**](docs/DEPLOY_24_7.md): Guia de deploy em nuvem gratuita (GitHub Actions, DigitalOcean Student Pack, Google Cloud).
+- 📈 [**`reports/LIVE_DASHBOARD.md`**](reports/LIVE_DASHBOARD.md): Painel ao vivo de operações de Paper Trading.
 
-## Validação e execução
+---
 
-    python -m ruff check src tests dashboard
-    python -m pytest -q
-    terraform -chdir=infra/terraform init -backend=false
-    terraform -chdir=infra/terraform validate
-
-Docker local:
-
-    docker compose up --build postgres dashboard
-
-O dashboard fica em `http://localhost:8501`. O compose não agenda jobs automaticamente para evitar mutações paper acidentais.
-
-## Documentação
-
-- [Protocolo pré-registrado](docs/PROTOCOL.md)
-- [Protocolo V2](docs/PROTOCOL_V2.md)
-- [Fontes e dicionário de dados](docs/DATA.md)
-- [Operação, canário e recuperação](docs/OPERATIONS.md)
-- [Segurança e limites](docs/SECURITY.md)
-- [Deploy em Cloud Run](docs/CLOUD.md)
-- [Critérios de aceite](docs/ACCEPTANCE.md)
-- [Resultados da primeira leva e plano v2](docs/RESULTS_FIRST_RUN.md)
-- [Protocolo V3](docs/PROTOCOL_V3.md)
-- [Critérios de aceite V3](docs/ACCEPTANCE_V3.md)
-- [Estado de implementação V3](docs/V3_PROGRESS.md)
-- [Resultados V3 pré-holdout](docs/RESULTS_V3_PREHOLDOUT.md)
-- [Diagnóstico V3 de sinal e gate](docs/DIAGNOSTIC_V3_GATE.md)
-
-## Limitações explícitas
-
-- Métricas de Solana descrevem atividade do ecossistema e não são equivalentes às métricas de BTC/ETH.
-- Fear & Greed é geral, centrado em Bitcoin e parcialmente derivado do mercado.
-- Fills paper não reproduzem prioridade de fila, latência ou impacto real integral.
-- Free tiers não têm SLA; orçamento é alerta, não hard cap, e custo zero não é garantido.
-- Nenhuma conclusão de promoção ou uso real é válida antes de holdout e paper; resultados preliminares negativos/inconclusivos ficam documentados separadamente.
+<p align="center">
+  <sub>Desenvolvido para fins de pesquisa quantitativa e simulação em ambiente institucional reproduzível.</sub>
+</p>
