@@ -63,6 +63,6 @@ gates:
   maximum_drawdown: 0.08
 
 data:
-  include_intrahour_15m: true
+  include_intrahour_15m: false
   stationary_features: true
   feature_schema_version: v5-rf-transformer-stationary

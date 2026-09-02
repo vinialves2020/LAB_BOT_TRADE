@@ -52,6 +52,7 @@ class PaperTradingV5:
         self.feature_columns: dict[str, list[str]] = {}
 
         import os
+
         from bottrade.alerts import TelegramAlerter
         token = os.environ.get("TELEGRAM_BOT_TOKEN") or app_config.runtime.telegram_bot_token
         chat_id = os.environ.get("TELEGRAM_CHAT_ID") or app_config.runtime.telegram_chat_id
@@ -85,29 +86,48 @@ class PaperTradingV5:
             include_intrahour_15m=False,
         )
 
+        import json
+        from pathlib import Path
+
         for asset in (Asset.BTCUSDT, Asset.ETHUSDT, Asset.SOLUSDT):
             if asset.value in self.models:
                 continue
-            # Treina modelo nos dados pré-holdout
-            local_market = {
-                item.value: load_raw_market(self.app_config.project.data_dir, item, "1h")
-                for item in Asset
-            }
-            features = build_features(asset=asset, market=local_market, intrahour=None, config=v4_compat)
-            dataset = build_direct_dataset(
-                asset=asset,
-                features=features,
-                market=local_market[asset.value],
-                config=v4_compat,
-                pre_holdout_only=True,
-            )
-            frame = dataset.frame[dataset.frame["label_valid"].astype(bool)].reset_index(drop=True)
-            x = frame[list(dataset.feature_columns)].to_numpy(dtype=np.float32)
-            y = frame[dataset.target_column].to_numpy(dtype=np.float32)
-            ensemble = create_xgboost_reference(config=self.v5_config, feature_names=dataset.feature_columns)
-            ensemble.fit(x, y, np.arange(len(frame)))
-            self.models[asset.value] = ensemble
-            self.feature_columns[asset.value] = list(dataset.feature_columns)
+
+            # 1. Tenta carregar os modelos ONNX exportados
+            onnx_dir = Path(f"artifacts/v5/champion/{asset.value}")
+            features_file = onnx_dir / "features.json"
+            if features_file.exists() and (onnx_dir / "member_00.onnx").exists():
+                import onnxruntime as ort
+                cols = json.loads(features_file.read_text(encoding="utf-8"))
+                sessions = [
+                    ort.InferenceSession(str(onnx_dir / f"member_{i:02d}.onnx"), providers=["CPUExecutionProvider"])
+                    for i in range(5)
+                ]
+                self.models[asset.value] = sessions
+                self.feature_columns[asset.value] = cols
+                continue
+
+            # 2. Fallback: treina modelo se os dados locais existirem
+            with contextlib.suppress(Exception):
+                local_market = {
+                    item.value: load_raw_market(self.app_config.project.data_dir, item, "1h")
+                    for item in Asset
+                }
+                features = build_features(asset=asset, market=local_market, intrahour=None, config=v4_compat)
+                dataset = build_direct_dataset(
+                    asset=asset,
+                    features=features,
+                    market=local_market[asset.value],
+                    config=v4_compat,
+                    pre_holdout_only=True,
+                )
+                frame = dataset.frame[dataset.frame["label_valid"].astype(bool)].reset_index(drop=True)
+                x = frame[list(dataset.feature_columns)].to_numpy(dtype=np.float32)
+                y = frame[dataset.target_column].to_numpy(dtype=np.float32)
+                ensemble = create_xgboost_reference(config=self.v5_config, feature_names=dataset.feature_columns)
+                ensemble.fit(x, y, np.arange(len(frame)))
+                self.models[asset.value] = ensemble
+                self.feature_columns[asset.value] = list(dataset.feature_columns)
 
     def execute_cycle(self, live: bool = True) -> list[PaperSignal]:
         """Executa um ciclo completo de inferência, sinalização e execução simulada."""
@@ -147,7 +167,10 @@ class PaperTradingV5:
             x_sample = latest_row[cols].to_numpy(dtype=np.float32).reshape(1, -1)
 
             model = self.models[asset.value]
-            preds = [float(m.predict(x_sample)[0]) for m in model.members]
+            if isinstance(model, list):
+                preds = [float(sess.run(None, {sess.get_inputs()[0].name: x_sample})[0][0]) for sess in model]
+            else:
+                preds = [float(m.predict(x_sample)[0]) for m in model.members]
             pred_mean = float(np.mean(preds))
             pred_std = float(np.std(preds))
             effective = pred_mean - 0.5 * pred_std
