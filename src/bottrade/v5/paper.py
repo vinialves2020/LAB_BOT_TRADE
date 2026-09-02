@@ -168,9 +168,12 @@ class PaperTradingV5:
 
             model = self.models[asset.value]
             if isinstance(model, list):
-                preds = [float(sess.run(None, {sess.get_inputs()[0].name: x_sample})[0][0]) for sess in model]
+                preds = [
+                    float(np.asarray(sess.run(None, {sess.get_inputs()[0].name: x_sample})[0]).flatten()[0])
+                    for sess in model
+                ]
             else:
-                preds = [float(m.predict(x_sample)[0]) for m in model.members]
+                preds = [float(np.asarray(m.predict(x_sample)).flatten()[0]) for m in model.members]
             pred_mean = float(np.mean(preds))
             pred_std = float(np.std(preds))
             effective = pred_mean - 0.5 * pred_std
