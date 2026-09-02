@@ -88,6 +88,32 @@ def _relative_features(frame: pd.DataFrame, *, stationary: bool = False) -> pd.D
             name = f"volatility_{horizon}h"
             if name in result:
                 result[f"volatility_ratio_{horizon}h_168h"] = _numeric(result, name) / vol_168
+
+        # Cumulative Volume Delta (CVD) multi-horizon and price-delta divergences
+        base_vol = _numeric(result, "volume")
+        taker_vol = _numeric(result, "taker_buy_base_volume")
+        delta_vol = 2.0 * taker_vol - base_vol
+        for span in (3, 6, 24):
+            roll_vol = base_vol.rolling(span, min_periods=1).sum().replace(0.0, np.nan)
+            roll_delta = delta_vol.rolling(span, min_periods=1).sum()
+            cvd_ratio = roll_delta / roll_vol
+            result[f"cvd_ratio_{span}h"] = cvd_ratio
+            ret_name = f"return_{span}h"
+            if ret_name in result:
+                ret_span = _numeric(result, ret_name)
+                result[f"cvd_divergence_{span}h"] = np.sign(ret_span) * np.sign(cvd_ratio)
+
+    if "as_of" in result:
+        as_of_dt = pd.to_datetime(result["as_of"], utc=True, errors="coerce")
+        hour = as_of_dt.dt.hour.astype(float)
+        dayofweek = as_of_dt.dt.dayofweek.astype(float)
+        result["hour_sin"] = np.sin(2.0 * np.pi * hour / 24.0)
+        result["hour_cos"] = np.cos(2.0 * np.pi * hour / 24.0)
+        result["day_sin"] = np.sin(2.0 * np.pi * dayofweek / 7.0)
+        result["day_cos"] = np.cos(2.0 * np.pi * dayofweek / 7.0)
+        result["is_us_session"] = ((hour >= 12.0) & (hour <= 20.0)).astype(float)
+        result["is_weekend"] = (dayofweek >= 5.0).astype(float)
+
     # Absolute price columns are not useful to a per-asset model and would make
     # the schema needlessly asset-specific.  The ratios above preserve their
     # information without changing the point-in-time timestamp.

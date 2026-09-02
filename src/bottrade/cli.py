@@ -23,6 +23,7 @@ from bottrade.storage import Storage
 from bottrade.utils import ensure_utc, utc_now
 from bottrade.v3.cli import v3_app
 from bottrade.v4.cli import v4_app
+from bottrade.v5.cli import v5_app
 
 if TYPE_CHECKING:
     from bottrade.training import ExperimentResult
@@ -42,6 +43,7 @@ app.add_typer(paper_app, name="paper")
 app.add_typer(models_app, name="models")
 app.add_typer(v3_app, name="v3")
 app.add_typer(v4_app, name="v4")
+app.add_typer(v5_app, name="v5")
 
 ConfigOption = Annotated[
     str | None,

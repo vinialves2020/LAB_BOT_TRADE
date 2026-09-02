@@ -1,0 +1,17 @@
+[Unit]
+Description=BOT_TRADE V5 Paper Trading 24/7 Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/LAB_BOT_TRADE
+Environment="PATH=/home/ubuntu/LAB_BOT_TRADE/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+ExecStart=/home/ubuntu/LAB_BOT_TRADE/.venv/bin/bottrade v5 paper-run --live --loop --interval-seconds 60
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/bottrade.log
+StandardError=append:/var/log/bottrade_err.log
+
+[Install]
+WantedBy=multi-user.target

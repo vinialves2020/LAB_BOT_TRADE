@@ -1,0 +1,68 @@
+project:
+  protocol_version: v5-rf-transformer-benchmark
+  timezone: UTC
+  holdout_start: "2025-08-01T00:00:00Z"
+  holdout_end: "2026-07-31T23:59:59Z"
+
+models:
+  seeds: [11, 23, 37, 53, 71]
+  random_forest:
+    n_estimators: 100
+    max_depth: 10
+    max_samples: 0.5
+    max_features: 0.4
+    min_samples_leaf: 5
+    n_jobs: -1
+  transformer:
+    d_model: 64
+    nhead: 4
+    num_layers: 2
+    dim_feedforward: 128
+    dropout: 0.1
+    patch_length: 6
+    patch_stride: 3
+    lookback_hours: 72
+    learning_rate: 0.001
+    epochs: 10
+    batch_size: 256
+    device: cuda
+  xgboost:
+    max_depth: 4
+    learning_rate: 0.05
+    n_estimators: 150
+    subsample: 0.8
+    colsample_bytree: 0.8
+    objective: reg:squarederror
+    tree_method: hist
+
+costs:
+  round_trip_bps: 24.0
+  stress_multiplier: 2.0
+  entry_margins_bps: [0, 5, 10, 20, 30]
+
+policy:
+  stateful_hourly: true
+  max_holding_hours: 12
+  exit_on_non_positive: false
+  uncertainty_std_multiplier: 0.0
+
+validation:
+  train_months: 24
+  calibration_months: 3
+  test_months: 1
+  purge_hours: 12
+  minimum_pre_holdout_folds: 12
+  max_round_trips_per_asset_day: 2
+  minimum_calibration_trades: 10
+
+gates:
+  minimum_asset_monthly_trades: 4
+  minimum_portfolio_monthly_trades: 12
+  minimum_sharpe: 1.0
+  minimum_profit_factor: 1.2
+  maximum_drawdown: 0.08
+
+data:
+  include_intrahour_15m: true
+  stationary_features: true
+  feature_schema_version: v5-rf-transformer-stationary

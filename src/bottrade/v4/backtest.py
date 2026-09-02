@@ -175,25 +175,87 @@ def select_stateful_trades(
         effective = prediction - config.uncertainty_std_multiplier * deviation
         valid = bool(row.label_valid) and np.isfinite(float(row.entry_price))
         if position is not None:
+            current_price = float(row.entry_price)
+            position["peak_price"] = max(float(position.get("peak_price", position["entry_price"])), current_price)
+            entry_p = float(position["entry_price"])
+            current_gross = current_price / entry_p - 1.0 if entry_p > 0 else 0.0
+            peak_gross = float(position["peak_price"]) / entry_p - 1.0 if entry_p > 0 else 0.0
             held_hours = (entry_time - pd.Timestamp(position["entry_time"])).total_seconds() / 3600.0
+            vol_1h = float(getattr(row, "ewma_volatility_1h", 0.008))
+            if not np.isfinite(vol_1h) or vol_1h <= 0:
+                vol_1h = 0.008
+            trailing_stop = peak_gross >= (2.0 * vol_1h) and current_gross <= (peak_gross * 0.50)
+            hard_stop = current_gross <= (-3.0 * vol_1h)
+
             should_exit = (
                 not valid
                 or held_hours >= config.max_holding_hours
                 or effective < -threshold
                 or (config.exit_on_non_positive and effective <= 0.0)
+                or trailing_stop
+                or hard_stop
             )
             if should_exit:
                 close_position(entry_time, float(row.entry_price), prediction)
                 # Do not reverse/open again on the same candle.  This keeps a
                 # close and a new entry from becoming an artificial round trip.
                 continue
-        if position is None and valid and effective > threshold:
+
+        vol_ratio = getattr(row, "volatility_ratio_6h_168h", 1.0)
+        vol_compressed = np.isfinite(vol_ratio) and float(vol_ratio) < 0.65
+
+        # Macro BTC Trend Filter: if trading an altcoin and BTC is in a sharp 24h drop (< -1.8%), avoid buying
+        btc_24h = getattr(row, "ctx_BTCUSDT_return_24h", None)
+        btc_dumping = btc_24h is not None and np.isfinite(float(btc_24h)) and float(btc_24h) < -0.018
+
+        # Altcoin structural downtrend filter: if asset is > 2% below its 168h weekly EMA and BTC is negative
+        own_ema_168 = getattr(row, "close_to_ema_168h", 0.0)
+        own_in_downtrend = (
+            btc_24h is not None
+            and np.isfinite(float(own_ema_168))
+            and float(own_ema_168) < -0.020
+            and float(btc_24h) < 0.0
+        )
+
+        # Turbulent chop filter: when market is in a sideways range (within 2% of 72h EMA and vol_ratio >= 0.95),
+        # only allow entry if confirmed by positive taker CVD (cvd_ratio_6h > 0.02)
+        close_to_ema_72 = getattr(row, "close_to_ema_72h", 0.0)
+        cvd_6h = getattr(row, "cvd_ratio_6h", 0.0)
+        in_sideways_range = (
+            np.isfinite(close_to_ema_72)
+            and abs(float(close_to_ema_72)) < 0.020
+            and np.isfinite(vol_ratio)
+            and float(vol_ratio) >= 0.95
+        )
+        cvd_confirmed = np.isfinite(cvd_6h) and float(cvd_6h) > 0.02
+        turbulent_chop = in_sideways_range and not cvd_confirmed
+
+        # Solana specific regime protection:
+        # Solana is a high-beta momentum asset that gets severely chopped in sideways drift.
+        # Require SOL to only enter when there is directional trend (outside +/- 2.5% of 72h EMA).
+        current_asset = str(getattr(row, "asset", ""))
+        sol_sideways_filter = (
+            current_asset == "SOLUSDT"
+            and np.isfinite(close_to_ema_72)
+            and abs(float(close_to_ema_72)) < 0.025
+        )
+
+        entry_allowed = (
+            not vol_compressed
+            and not btc_dumping
+            and not own_in_downtrend
+            and not turbulent_chop
+            and not sol_sideways_filter
+        )
+
+        if position is None and valid and effective > threshold and entry_allowed:
             day = entry_time.date()
             if daily_entries.get(day, 0) < config.max_round_trips_per_asset_day:
                 position = {
                     "as_of": row.as_of,
                     "entry_time": entry_time,
                     "entry_price": float(row.entry_price),
+                    "peak_price": float(row.entry_price),
                     "prediction": prediction,
                 }
                 daily_entries[day] = daily_entries.get(day, 0) + 1
