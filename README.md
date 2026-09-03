@@ -148,6 +148,7 @@ O modelo passou por uma rigorosa auditoria em **6 meses contínuos de walk-forwa
 - 🧪 [**`docs/COMO_TESTAR.md`**](docs/COMO_TESTAR.md): Instruções passo a passo para executar localmente.
 - ☁️ [**`docs/DEPLOY_24_7.md`**](docs/DEPLOY_24_7.md): Guia de deploy em nuvem gratuita (GitHub Actions, DigitalOcean Student Pack, Google Cloud).
 - 📈 [**`reports/LIVE_DASHBOARD.md`**](reports/LIVE_DASHBOARD.md): Painel ao vivo de operações de Paper Trading.
+- 📋 [**`reports/DECISION_AUDIT.md`**](reports/DECISION_AUDIT.md): Livro de auditoria detalhado das decisões, previsões do ensemble e CVD.
 
 ---
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import contextlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
@@ -30,6 +30,14 @@ class PaperSignal:
     reason: str
     current_price: float
     ewma_volatility_1h: float
+    pred_std_bps: float = 0.0
+    member_preds_bps: list[float] = field(default_factory=list)
+    cvd_6h: float = 0.0
+    close_to_ema_72: float = 0.0
+    close_to_ema_168: float = 0.0
+    vol_ratio: float = 1.0
+    btc_24h_ret: float = 0.0
+    filters: dict[str, bool] = field(default_factory=dict)
 
 
 class PaperTradingV5:
@@ -248,6 +256,20 @@ class PaperTradingV5:
                     reason=reason,
                     current_price=curr_price,
                     ewma_volatility_1h=vol_1h,
+                    pred_std_bps=pred_std * 10_000,
+                    member_preds_bps=[float(p * 10_000) for p in preds],
+                    cvd_6h=cvd_6h,
+                    close_to_ema_72=close_to_ema_72,
+                    close_to_ema_168=close_to_ema_168,
+                    vol_ratio=vol_ratio,
+                    btc_24h_ret=btc_24h_ret,
+                    filters={
+                        "vol_compressed": bool(vol_compressed),
+                        "btc_dumping": bool(btc_dumping),
+                        "alt_downtrend": bool(alt_downtrend),
+                        "turbulent_chop": bool(turbulent_chop),
+                        "sol_sideways": bool(sol_sideways),
+                    },
                 )
             )
 
@@ -458,7 +480,121 @@ class PaperTradingV5:
         dashboard_file.parent.mkdir(parents=True, exist_ok=True)
         dashboard_file.write_text(md_content, encoding="utf-8")
 
+        # 3. Gravar log estruturado e livro de auditoria detalhado
+        self._save_decision_audit(
+            signals=signals,
+            now_str=now_str,
+            total_equity=total_equity,
+            cash=cash,
+            pos_list=pos_list,
+        )
+
         summary_env = os.environ.get("GITHUB_STEP_SUMMARY")
         if summary_env:
             with open(summary_env, "a", encoding="utf-8") as f:
                 f.write(md_content)
+
+    def _save_decision_audit(
+        self,
+        signals: list[PaperSignal],
+        now_str: str,
+        total_equity: float,
+        cash: float,
+        pos_list: list[Any],
+    ) -> None:
+        """Salva histórico auditável completo em JSONL e Markdown detalhado."""
+        import json
+        from pathlib import Path
+
+        reports_dir = Path("reports")
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Registro JSONL compacto para análise programática
+        jsonl_path = reports_dir / "decisions.jsonl"
+        cycle_record = {
+            "timestamp": now_str,
+            "total_equity": round(total_equity, 2),
+            "cash": round(cash, 2),
+            "signals": [
+                {
+                    "asset": s.asset,
+                    "price": round(s.current_price, 4),
+                    "signal": s.signal,
+                    "effective_bps": round(s.effective_bps, 2),
+                    "pred_mean_bps": round(s.prediction_bps, 2),
+                    "pred_std_bps": round(s.pred_std_bps, 2),
+                    "threshold_bps": round(s.threshold_bps, 2),
+                    "member_preds_bps": [round(p, 2) for p in s.member_preds_bps],
+                    "cvd_6h": round(s.cvd_6h, 4),
+                    "vol_1h": round(s.ewma_volatility_1h, 4),
+                    "vol_ratio": round(s.vol_ratio, 2),
+                    "close_to_ema_72": round(s.close_to_ema_72, 4),
+                    "close_to_ema_168": round(s.close_to_ema_168, 4),
+                    "btc_24h_ret": round(s.btc_24h_ret, 4),
+                    "filters": s.filters,
+                    "reason": s.reason,
+                }
+                for s in signals
+            ],
+            "active_positions": [
+                {
+                    "asset": p.asset.value,
+                    "quantity": float(p.quantity),
+                    "average_price": float(p.average_price),
+                }
+                for p in pos_list
+                if float(p.quantity) > 0
+            ],
+        }
+        with open(jsonl_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(cycle_record, ensure_ascii=False) + "\n")
+
+        # 2. Livro de Auditoria Humana (reports/DECISION_AUDIT.md)
+        audit_file = reports_dir / "DECISION_AUDIT.md"
+        existing_content = audit_file.read_text(encoding="utf-8") if audit_file.exists() else ""
+
+        header_marker = "<!-- AUDIT_START -->\n"
+        if header_marker in existing_content:
+            old_body = existing_content.split(header_marker, 1)[1]
+        else:
+            old_body = ""
+
+        old_blocks = [b.strip() for b in old_body.split("\n---\n") if b.strip()]
+        kept_blocks = old_blocks[:35]
+
+        new_block_lines = [
+            f"### 🕒 Ciclo `{now_str}` | Patrimônio: **${total_equity:,.2f} USDT** (Caixa: `${cash:,.2f}`)",
+            "",
+            "| Ativo | Preço | Sinal | Previsão Líquida | Consenso 5x XGBoost | Order Flow (CVD 6h) | Volatilidade | Filtros de Risco | Racional Quantitativo |",
+            "|:---|---:|:---:|---:|:---|:---:|:---:|:---|:---|",
+        ]
+        for s in signals:
+            badge = (
+                "🟢 **BUY**"
+                if s.signal == "BUY"
+                else (
+                    "🔴 **SELL**"
+                    if s.signal == "SELL"
+                    else ("🟡 **HOLD**" if s.signal == "HOLD" else "⚪ **CASH**")
+                )
+            )
+            preds_str = f"[{', '.join(f'{p:+.1f}' for p in s.member_preds_bps)}]"
+            active_filters = [f"`{k}`" for k, v in s.filters.items() if v]
+            flt_str = " ".join(active_filters) if active_filters else "Liberado ✅"
+            new_block_lines.append(
+                f"| **{s.asset}** | ${s.current_price:,.2f} | {badge} | **{s.effective_bps:+.1f} bps** (±{s.pred_std_bps:.1f}) | `{preds_str}` | `{s.cvd_6h:+.3f}` | `{s.ewma_volatility_1h*100:.2f}%/h` | {flt_str} | {s.reason} |"
+            )
+
+        new_block = "\n".join(new_block_lines)
+
+        header = (
+            "# 📋 BOT_TRADE V5 — Livro de Auditoria de Decisões e Análise de Mercado\n\n"
+            "Este documento registra o histórico contínuo das decisões tomadas pelo algoritmo a cada ciclo em tempo real na Binance.\n"
+            "Ele permite auditar o consenso dos 5 modelos XGBoost, o comportamento do CVD (Cumulative Volume Delta) e o disparo de travas de risco.\n\n"
+            f"**Última Atualização**: `{now_str}` | **Ledger**: `{self.ledger_name}`\n\n"
+            f"{header_marker}"
+        )
+
+        all_blocks = [new_block] + kept_blocks
+        full_md = header + "\n\n---\n\n".join(all_blocks) + "\n"
+        audit_file.write_text(full_md, encoding="utf-8")
