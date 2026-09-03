@@ -219,26 +219,33 @@ def select_stateful_trades(
 
         # Turbulent chop filter: when market is in a sideways range (within 2% of 72h EMA and vol_ratio >= 0.95),
         # only allow entry if confirmed by positive taker CVD (cvd_ratio_6h > 0.02)
-        close_to_ema_72 = getattr(row, "close_to_ema_72h", 0.0)
-        cvd_6h = getattr(row, "cvd_ratio_6h", 0.0)
-        in_sideways_range = (
-            np.isfinite(close_to_ema_72)
-            and abs(float(close_to_ema_72)) < 0.020
-            and np.isfinite(vol_ratio)
-            and float(vol_ratio) >= 0.95
-        )
-        cvd_confirmed = np.isfinite(cvd_6h) and float(cvd_6h) > 0.02
-        turbulent_chop = in_sideways_range and not cvd_confirmed
+        has_chop_cols = hasattr(row, "close_to_ema_72h") and hasattr(row, "cvd_ratio_6h")
+        if has_chop_cols:
+            close_to_ema_72 = row.close_to_ema_72h
+            cvd_6h = row.cvd_ratio_6h
+            in_sideways_range = (
+                np.isfinite(close_to_ema_72)
+                and abs(float(close_to_ema_72)) < 0.020
+                and np.isfinite(vol_ratio)
+                and float(vol_ratio) >= 0.95
+            )
+            cvd_confirmed = np.isfinite(cvd_6h) and float(cvd_6h) > 0.02
+            turbulent_chop = in_sideways_range and not cvd_confirmed
+        else:
+            turbulent_chop = False
 
         # Solana specific regime protection:
         # Solana is a high-beta momentum asset that gets severely chopped in sideways drift.
         # Require SOL to only enter when there is directional trend (outside +/- 2.5% of 72h EMA).
         current_asset = str(getattr(row, "asset", ""))
-        sol_sideways_filter = (
-            current_asset == "SOLUSDT"
-            and np.isfinite(close_to_ema_72)
-            and abs(float(close_to_ema_72)) < 0.025
-        )
+        if current_asset == "SOLUSDT" and hasattr(row, "close_to_ema_72h"):
+            close_to_ema_72 = row.close_to_ema_72h
+            sol_sideways_filter = (
+                np.isfinite(close_to_ema_72)
+                and abs(float(close_to_ema_72)) < 0.025
+            )
+        else:
+            sol_sideways_filter = False
 
         entry_allowed = (
             not vol_compressed

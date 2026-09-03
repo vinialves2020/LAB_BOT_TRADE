@@ -130,6 +130,12 @@ def test_portfolio_has_two_independent_ledgers_and_caps() -> None:
 
 
 def test_v3_cli_preflight_reports_closed_holdout() -> None:
+    from pathlib import Path
+
+    import pytest
+
+    if not Path("data/raw/market/BTCUSDT_1h.parquet").exists():
+        pytest.skip("data/raw/market/BTCUSDT_1h.parquet not available in CI environment")
     runner = CliRunner()
     result = runner.invoke(v3_app, ["preflight", "--config", "config/v3.yaml"])
     assert result.exit_code == 0, result.output
