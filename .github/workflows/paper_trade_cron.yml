@@ -1,14 +1,11 @@
 name: Paper Trading V5 (24/7 Hourly Engine)
 
 on:
-  schedule:
-    # Executa no minuto 2 de cada hora UTC (logo após o fechamento do candle de 1h)
-    - cron: '2 * * * *'
-  workflow_dispatch: # Permite disparo manual pelo painel do GitHub Actions
+  workflow_dispatch: # Disparado pontualmente pelo cron-job.org ou manualmente
 
 concurrency:
   group: paper-trading-v5
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   paper-cycle:
@@ -51,4 +48,13 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add reports/LIVE_DASHBOARD.md reports/DECISION_AUDIT.md reports/decisions.jsonl
-          git diff --staged --quiet || (git commit -m "chore(paper): atualizar dashboard e log de auditoria [skip ci]" && git pull --rebase origin main && git push)
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(paper): atualizar dashboard e log de auditoria [skip ci]"
+            for attempt in 1 2 3; do
+              git push origin main && break
+              echo "Aviso: Push concorrente detectado (tentativa $attempt), sincronizando..."
+              git fetch origin main
+              git rebase -X theirs origin/main || (git rebase --abort && git reset --soft origin/main && git commit -m "chore(paper): atualizar dashboard e log de auditoria [skip ci]")
+              sleep 2
+            done
+          fi
