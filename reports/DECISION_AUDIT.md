@@ -3,9 +3,19 @@
 Este documento registra o histórico contínuo das decisões tomadas pelo algoritmo a cada ciclo em tempo real na Binance.
 Ele permite auditar o consenso dos 5 modelos XGBoost, o comportamento do CVD (Cumulative Volume Delta) e o disparo de travas de risco.
 
-**Última Atualização**: `2026-09-28 13:47:01 UTC` | **Ledger**: `paper_1000`
+**Última Atualização**: `2026-09-28 14:02:29 UTC` | **Ledger**: `paper_1000`
 
 <!-- AUDIT_START -->
+### 🕒 Ciclo `2026-09-28 14:02:29 UTC` | Patrimônio: **$1,000.00 USDT** (Caixa: `$1,000.00`)
+
+| Ativo | Preço | Sinal | Previsão Líquida | Consenso 5x XGBoost | Order Flow (CVD 6h) | Volatilidade | Filtros de Risco | Racional Quantitativo |
+|:---|---:|:---:|---:|:---|:---:|:---:|:---|:---|
+| **BTCUSDT** | $83,474.01 | ⚪ **CASH** | **-0.4 bps** (±0.1) | `[-0.5, -0.3, -0.1, -0.4, -0.3]` | `-0.056` | `0.26%/h` | Liberado ✅ | Aguardando sinal com assimetria |
+| **ETHUSDT** | $2,684.63 | ⚪ **CASH** | **-0.1 bps** (±0.1) | `[+0.2, -0.1, -0.1, -0.1, -0.1]` | `+0.005` | `0.32%/h` | `turbulent_chop` | Aguardando sinal com assimetria |
+| **SOLUSDT** | $119.57 | ⚪ **CASH** | **-1.8 bps** (±0.3) | `[-1.5, -2.2, -1.5, -1.8, -1.5]` | `+0.089` | `0.58%/h` | `sol_sideways` | Aguardando sinal com assimetria |
+
+---
+
 ### 🕒 Ciclo `2026-09-28 13:47:01 UTC` | Patrimônio: **$1,000.00 USDT** (Caixa: `$1,000.00`)
 
 | Ativo | Preço | Sinal | Previsão Líquida | Consenso 5x XGBoost | Order Flow (CVD 6h) | Volatilidade | Filtros de Risco | Racional Quantitativo |
@@ -353,13 +363,3 @@ Ele permite auditar o consenso dos 5 modelos XGBoost, o comportamento do CVD (Cu
 | **BTCUSDT** | $83,248.01 | ⚪ **CASH** | **-0.4 bps** (±0.1) | `[-0.5, -0.3, -0.3, -0.4, -0.3]` | `-0.137` | `0.24%/h` | Liberado ✅ | Aguardando sinal com assimetria |
 | **ETHUSDT** | $2,649.55 | ⚪ **CASH** | **-1.6 bps** (±0.3) | `[-1.5, -1.2, -1.2, -1.9, -1.6]` | `-0.202` | `0.28%/h` | `turbulent_chop` | Aguardando sinal com assimetria |
 | **SOLUSDT** | $119.40 | ⚪ **CASH** | **-1.3 bps** (±0.5) | `[-1.3, -0.1, -1.0, -1.2, -1.6]` | `-0.004` | `0.59%/h` | `sol_sideways` | Aguardando sinal com assimetria |
-
----
-
-### 🕒 Ciclo `2026-09-28 05:02:12 UTC` | Patrimônio: **$1,000.00 USDT** (Caixa: `$1,000.00`)
-
-| Ativo | Preço | Sinal | Previsão Líquida | Consenso 5x XGBoost | Order Flow (CVD 6h) | Volatilidade | Filtros de Risco | Racional Quantitativo |
-|:---|---:|:---:|---:|:---|:---:|:---:|:---|:---|
-| **BTCUSDT** | $83,496.69 | ⚪ **CASH** | **-0.4 bps** (±0.1) | `[-0.5, -0.3, -0.3, -0.4, -0.3]` | `-0.137` | `0.24%/h` | Liberado ✅ | Aguardando sinal com assimetria |
-| **ETHUSDT** | $2,658.93 | ⚪ **CASH** | **-1.6 bps** (±0.3) | `[-1.5, -1.2, -1.2, -1.9, -1.6]` | `-0.202` | `0.28%/h` | `turbulent_chop` | Aguardando sinal com assimetria |
-| **SOLUSDT** | $120.02 | ⚪ **CASH** | **-1.3 bps** (±0.5) | `[-1.3, -0.1, -1.0, -1.2, -1.6]` | `-0.004` | `0.59%/h` | `sol_sideways` | Aguardando sinal com assimetria |
