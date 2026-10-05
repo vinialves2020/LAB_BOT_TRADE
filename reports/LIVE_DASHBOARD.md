@@ -1,5 +1,5 @@
 # 🤖 BOTTRADE V5 - Painel Oficial de Paper Trading
-**Ultima Atualizacao**: `2026-10-05 22:02:12 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+**Ultima Atualizacao**: `2026-10-05 22:17:23 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
 ## 💰 Resumo da Carteira
 - **Patrimonio Liquido Total**: **$1,000.00 USDT** (`+0.00%`)
@@ -10,9 +10,9 @@
 
 | Ativo | Preco Atual | Sinal | Previsao | Gate Custo | Status / Diagnostico |
 |:---|---:|:---:|---:|---:|:---|
-| **BTCUSDT** | $85,960.22 | ⚪ **CASH** | -0.3 bps | 24.0 bps | Aguardando sinal com assimetria |
-| **ETHUSDT** | $2,718.40 | ⚪ **CASH** | +0.1 bps | 24.0 bps | Aguardando sinal com assimetria |
-| **SOLUSDT** | $120.94 | ⚪ **CASH** | -1.7 bps | 24.0 bps | Aguardando sinal com assimetria |
+| **BTCUSDT** | $85,962.01 | ⚪ **CASH** | -0.3 bps | 24.0 bps | Aguardando sinal com assimetria |
+| **ETHUSDT** | $2,718.63 | ⚪ **CASH** | +0.1 bps | 24.0 bps | Aguardando sinal com assimetria |
+| **SOLUSDT** | $121.47 | ⚪ **CASH** | -1.7 bps | 24.0 bps | Aguardando sinal com assimetria |
 
 ## 📈 Posicoes Abertas
 
