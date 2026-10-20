@@ -159,7 +159,7 @@ def export_champion(
         holdout_start=v5_config.holdout_start,
         holdout_end=v5_config.holdout_end,
         lookback_hours=v5_config.tf_lookback_hours,
-        horizon_hours=1,
+        horizon_hours=v5_config.max_holding_hours,
         purge_hours=v5_config.purge_hours,
         round_trip_bps=v5_config.round_trip_bps,
         stationary_features=v5_config.stationary_features,
@@ -177,10 +177,11 @@ def export_champion(
 
     frame = dataset.frame[dataset.frame["label_valid"].astype(bool)].reset_index(drop=True)
     x = frame[list(dataset.feature_columns)].to_numpy(dtype=np.float32)
-    y = frame[dataset.target_column].to_numpy(dtype=np.float32)
-    train_idx = np.arange(len(frame))
+    y = np.clip(frame[dataset.target_column].to_numpy(dtype=np.float32), -0.06, 0.06)
+    window_rows = v5_config.train_months * 30 * 24
+    train_idx = np.arange(max(0, len(frame) - window_rows), len(frame))
 
-    typer.echo(f"Treinando {model} em {len(train_idx)} amostras para exportação...")
+    typer.echo(f"Treinando {model} em {len(train_idx)} amostras recentes (horizonte {v4_compat.horizon_hours}h) para exportação...")
     if model in {"random_forest", "rf"}:
         from bottrade.v5.models.random_forest import RFEnsemble
         ensemble = RFEnsemble.create(config=v5_config, feature_names=dataset.feature_columns)
@@ -196,10 +197,15 @@ def export_champion(
         err = ensemble.verify_onnx(output_dir, x[:128])
         typer.echo(f"Transformer exportado para {output_dir} com erro ONNX={err:.2e} (OK)")
     elif model in {"xgboost", "xgb"}:
+        import json
+
         from bottrade.v5.models.xgboost_ref import create_xgboost_reference
         ensemble = create_xgboost_reference(config=v5_config, feature_names=dataset.feature_columns)
         ensemble.fit(x, y, train_idx)
         paths = ensemble.export_onnx(output_dir)
+        (output_dir / "features.json").write_text(
+            json.dumps(list(dataset.feature_columns), indent=2), encoding="utf-8"
+        )
         sample_idx = np.arange(min(128, len(x)))
         err = ensemble.verify_onnx(paths, x, sample_idx)
         typer.echo(f"XGBoost exportado para {output_dir} com erro ONNX={err:.2e} (OK)")

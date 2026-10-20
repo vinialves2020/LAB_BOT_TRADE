@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import contextlib
+import json
+import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
+from bottrade.alerts import TelegramAlerter
 from bottrade.config import AppConfig
 from bottrade.data.binance import BinanceClient
 from bottrade.data.http import PublicHttpClient
-from bottrade.domain import Asset
-from bottrade.storage import Storage
+from bottrade.domain import Asset, PaperFill, PaperOrder
+from bottrade.storage import LedgerRow, Storage
 from bottrade.utils import utc_now
 from bottrade.v4.config import V4Config
 from bottrade.v4.features import build_direct_dataset, build_features, load_raw_market
@@ -32,26 +37,32 @@ class PaperSignal:
     ewma_volatility_1h: float
     pred_std_bps: float = 0.0
     member_preds_bps: list[float] = field(default_factory=list)
+    flow_bps: float = 0.0
     cvd_6h: float = 0.0
+    cvd_24h: float = 0.0
+    close_to_ema_24: float = 0.0
     close_to_ema_72: float = 0.0
     close_to_ema_168: float = 0.0
+    dist_high_24: float = 0.0
     vol_ratio: float = 1.0
     btc_24h_ret: float = 0.0
     filters: dict[str, bool] = field(default_factory=dict)
 
 
 class PaperTradingV5:
-    """Motor oficial de Paper Trading V5 com dados em tempo real da Binance."""
+    """Motor oficial de Paper Trading V5 (Horizonte Swing 12h + Microestrutura CVD)."""
 
     def __init__(
         self,
         v5_config: V5Config,
         app_config: AppConfig,
         ledger_name: str = "paper_1000",
+        state_path: str | Path = "reports/paper_state.json",
     ) -> None:
         self.v5_config = v5_config
         self.app_config = app_config
         self.ledger_name = ledger_name
+        self.state_path = Path(state_path)
         self.storage = Storage(app_config.runtime.database_url)
         self.storage.initialize(app_config)
         self.http_client = PublicHttpClient()
@@ -59,12 +70,41 @@ class PaperTradingV5:
         self.models: dict[str, Any] = {}
         self.feature_columns: dict[str, list[str]] = {}
 
-        import os
-
-        from bottrade.alerts import TelegramAlerter
         token = os.environ.get("TELEGRAM_BOT_TOKEN") or app_config.runtime.telegram_bot_token
         chat_id = os.environ.get("TELEGRAM_CHAT_ID") or app_config.runtime.telegram_chat_id
         self.alerter = TelegramAlerter(token or "", chat_id or "")
+
+    def _load_portfolio_state(self) -> dict[str, Any]:
+        """Carrega o estado persistente da carteira (compatível com execução stateless no GitHub Actions)."""
+        default_state: dict[str, Any] = {
+            "ledger": self.ledger_name,
+            "initial_cash": 1000.0,
+            "cash": 1000.0,
+            "realized_pnl_usdt": 0.0,
+            "closed_trades_count": 0,
+            "winning_trades_count": 0,
+            "positions": {},
+            "last_exit_times": {},
+            "trade_history": [],
+        }
+        if self.state_path.exists():
+            with contextlib.suppress(Exception):
+                loaded = json.loads(self.state_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    default_state.update(loaded)
+        return default_state
+
+    def _save_portfolio_state(self, state: dict[str, Any]) -> None:
+        """Persiste o estado da carteira em JSON versionado e sincroniza o caixa no SQLite."""
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(
+            json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        with contextlib.suppress(Exception), self.storage.session() as session:
+            ledger_obj = session.get(LedgerRow, self.ledger_name)
+            if ledger_obj is not None:
+                ledger_obj.cash = Decimal(f"{float(state['cash']):.6f}")
+                session.commit()
 
     def _fetch_market_frames(self, live: bool = True) -> dict[str, pd.DataFrame]:
         """Obtém os candles horários mais recentes de BTC, ETH e SOL."""
@@ -76,46 +116,45 @@ class PaperTradingV5:
                     market[asset.value] = df
                 return market
             except Exception:
-                pass  # Fallback para dados locais se offline
+                pass
         for asset in Asset:
             market[asset.value] = load_raw_market(self.app_config.project.data_dir, asset, "1h")
         return market
 
     def _ensure_models_trained(self, market: dict[str, pd.DataFrame]) -> None:
-        """Garante que os modelos campeões estejam carregados para inferência."""
+        """Garante que os modelos campeões de 12h estejam carregados para inferência."""
         v4_compat = V4Config(
             holdout_start=self.v5_config.holdout_start,
             holdout_end=self.v5_config.holdout_end,
             lookback_hours=self.v5_config.tf_lookback_hours,
-            horizon_hours=1,
+            horizon_hours=self.v5_config.max_holding_hours,
             purge_hours=self.v5_config.purge_hours,
             round_trip_bps=self.v5_config.round_trip_bps,
             stationary_features=self.v5_config.stationary_features,
             include_intrahour_15m=False,
         )
 
-        import json
-        from pathlib import Path
-
         for asset in (Asset.BTCUSDT, Asset.ETHUSDT, Asset.SOLUSDT):
             if asset.value in self.models:
                 continue
 
-            # 1. Tenta carregar os modelos ONNX exportados
             onnx_dir = Path(f"artifacts/v5/champion/{asset.value}")
             features_file = onnx_dir / "features.json"
             if features_file.exists() and (onnx_dir / "member_00.onnx").exists():
                 import onnxruntime as ort
+
                 cols = json.loads(features_file.read_text(encoding="utf-8"))
                 sessions = [
-                    ort.InferenceSession(str(onnx_dir / f"member_{i:02d}.onnx"), providers=["CPUExecutionProvider"])
+                    ort.InferenceSession(
+                        str(onnx_dir / f"member_{i:02d}.onnx"),
+                        providers=["CPUExecutionProvider"],
+                    )
                     for i in range(5)
                 ]
                 self.models[asset.value] = sessions
                 self.feature_columns[asset.value] = cols
                 continue
 
-            # 2. Fallback: treina modelo se os dados locais existirem
             with contextlib.suppress(Exception):
                 local_market = {
                     item.value: load_raw_market(self.app_config.project.data_dir, item, "1h")
@@ -131,14 +170,16 @@ class PaperTradingV5:
                 )
                 frame = dataset.frame[dataset.frame["label_valid"].astype(bool)].reset_index(drop=True)
                 x = frame[list(dataset.feature_columns)].to_numpy(dtype=np.float32)
-                y = frame[dataset.target_column].to_numpy(dtype=np.float32)
+                y = np.clip(frame[dataset.target_column].to_numpy(dtype=np.float32), -0.06, 0.06)
+                window_rows = self.v5_config.train_months * 30 * 24
+                train_idx = np.arange(max(0, len(frame) - window_rows), len(frame))
                 ensemble = create_xgboost_reference(config=self.v5_config, feature_names=dataset.feature_columns)
-                ensemble.fit(x, y, np.arange(len(frame)))
+                ensemble.fit(x, y, train_idx)
                 self.models[asset.value] = ensemble
                 self.feature_columns[asset.value] = list(dataset.feature_columns)
 
     def execute_cycle(self, live: bool = True) -> list[PaperSignal]:
-        """Executa um ciclo completo de inferência, sinalização e execução simulada."""
+        """Executa um ciclo completo de inferência 12h, sinalização e execução simulada persistente."""
         market = self._fetch_market_frames(live=live)
         self._ensure_models_trained(market)
 
@@ -146,7 +187,7 @@ class PaperTradingV5:
             holdout_start=self.v5_config.holdout_start,
             holdout_end=self.v5_config.holdout_end,
             lookback_hours=self.v5_config.tf_lookback_hours,
-            horizon_hours=1,
+            horizon_hours=self.v5_config.max_holding_hours,
             purge_hours=self.v5_config.purge_hours,
             round_trip_bps=self.v5_config.round_trip_bps,
             stationary_features=self.v5_config.stationary_features,
@@ -155,18 +196,16 @@ class PaperTradingV5:
 
         signals: list[PaperSignal] = []
         now_utc = utc_now()
+        state = self._load_portfolio_state()
+        cash = float(state.get("cash", 1000.0))
+        positions_state: dict[str, dict[str, Any]] = state.setdefault("positions", {})
+        last_exits: dict[str, str] = state.setdefault("last_exit_times", {})
+        trade_history: list[dict[str, Any]] = state.setdefault("trade_history", [])
 
-        # Obter posições atuais no ledger
-        positions = {p.asset: p for p in self.storage.positions(self.ledger_name)}
-        from bottrade.storage import LedgerRow
-        with self.storage.session() as session:
-            ledger_obj = session.get(LedgerRow, self.ledger_name)
-            cash = float(ledger_obj.cash) if ledger_obj else 1000.0
-
-        # 1. Inferência para cada ativo
         btc_features = build_features(asset=Asset.BTCUSDT, market=market, intrahour=None, config=v4_compat)
         btc_latest = btc_features.iloc[-1]
         btc_24h_ret = float(btc_latest.get("return_24h", 0.0))
+        btc_cvd_24h = float(btc_latest.get("cvd_ratio_24h", 0.0))
 
         for asset in (Asset.BTCUSDT, Asset.ETHUSDT, Asset.SOLUSDT):
             features = build_features(asset=asset, market=market, intrahour=None, config=v4_compat)
@@ -182,110 +221,141 @@ class PaperTradingV5:
                 ]
             else:
                 preds = [float(np.asarray(m.predict(x_sample)).flatten()[0]) for m in model.members]
-            pred_mean = float(np.mean(preds))
-            pred_std = float(np.std(preds))
-            effective = pred_mean - 0.5 * pred_std
+
+            pred_mean_bps = float(np.mean(preds)) * 10_000.0
+            pred_std_bps = float(np.std(preds)) * 10_000.0
 
             curr_price = float(market[asset.value].iloc[-1]["close"])
             vol_1h = float(latest_row.get("ewma_volatility_1h", 0.008))
+            if not np.isfinite(vol_1h) or vol_1h <= 0:
+                vol_1h = 0.008
             vol_ratio = float(latest_row.get("volatility_ratio_6h_168h", 1.0))
+            close_to_ema_24 = float(latest_row.get("close_to_ema_24h", 0.0))
             close_to_ema_72 = float(latest_row.get("close_to_ema_72h", 0.0))
             close_to_ema_168 = float(latest_row.get("close_to_ema_168h", 0.0))
+            dist_high_24 = float(latest_row.get("close_to_previous_high_24h", 0.0))
             cvd_6h = float(latest_row.get("cvd_ratio_6h", 0.0))
+            cvd_24h = float(latest_row.get("cvd_ratio_24h", 0.0))
 
-            # Filtros quantitativos
-            threshold = (self.v5_config.round_trip_bps + self.v5_config.entry_margins_bps[0]) / 10_000.0
-            vol_compressed = vol_ratio < 0.65
-            btc_dumping = (asset != Asset.BTCUSDT) and (btc_24h_ret < -0.018)
-            alt_downtrend = (asset != Asset.BTCUSDT) and (close_to_ema_168 < -0.020) and (btc_24h_ret < 0.0)
-            in_sideways = abs(close_to_ema_72) < 0.020 and vol_ratio >= 0.95
-            turbulent_chop = in_sideways and (cvd_6h <= 0.02)
-            sol_sideways = (asset == Asset.SOLUSDT) and (abs(close_to_ema_72) < 0.025)
+            # Alpha Composto Institucional (Previsão Swing 12h + Impulso de Order Flow CVD)
+            flow_bps = (cvd_24h * 120.0) + (cvd_6h * 80.0) + (btc_cvd_24h * 60.0)
+            effective_bps = 0.55 * pred_mean_bps + 0.45 * flow_bps - 0.10 * pred_std_bps
+            threshold_bps = float(self.v5_config.round_trip_bps + self.v5_config.entry_margins_bps[0])
 
-            current_pos = positions.get(asset)
-            has_position = current_pos is not None and float(current_pos.quantity) > 0
+            # Filtros inteligentes de regime, fluxo e anti-topo
+            vol_compressed = vol_ratio < 0.70
+            btc_dumping = btc_24h_ret < -0.020
+            weak_order_flow = not ((cvd_24h > 0.015) and (cvd_6h > 0.015) and (btc_cvd_24h > -0.010))
+            stretched_top = not ((dist_high_24 < -0.003) and (close_to_ema_24 > -0.015))
+
+            cooldown_active = False
+            last_exit_str = last_exits.get(asset.value)
+            if last_exit_str:
+                with contextlib.suppress(Exception):
+                    last_dt = datetime.fromisoformat(last_exit_str)
+                    if (now_utc - last_dt).total_seconds() < 3.0 * 3600.0:
+                        cooldown_active = True
+
+            pos_info = positions_state.get(asset.value)
+            has_position = pos_info is not None and float(pos_info.get("quantity", 0.0)) > 0.0
 
             signal_label = "CASH"
-            reason = "Aguardando sinal com assimetria"
+            reason = "Aguardando setup com assimetria (> 24.0 bps)"
 
-            if has_position:
-                entry_p = float(current_pos.entry_price)
+            if has_position and pos_info is not None:
+                entry_p = float(pos_info["entry_price"])
                 gross = curr_price / entry_p - 1.0 if entry_p > 0 else 0.0
-                peak_p = float(getattr(current_pos, "peak_price", entry_p))
-                peak_p = max(peak_p, curr_price)
+                peak_p = max(float(pos_info.get("peak_price", entry_p)), curr_price)
+                pos_info["peak_price"] = peak_p
                 peak_gross = peak_p / entry_p - 1.0 if entry_p > 0 else 0.0
 
-                trailing_stop = peak_gross >= (2.0 * vol_1h) and gross <= (peak_gross * 0.50)
-                hard_stop = gross <= (-3.0 * vol_1h)
+                opened_dt = now_utc
+                with contextlib.suppress(Exception):
+                    opened_dt = datetime.fromisoformat(str(pos_info.get("opened_at", now_utc.isoformat())))
+                held_hours = max(0.0, (now_utc - opened_dt).total_seconds() / 3600.0)
 
-                if effective <= 0.0:
+                trailing_stop = peak_gross >= max(0.010, 1.8 * vol_1h) and gross <= (peak_gross * 0.55)
+                hard_stop = gross <= -max(0.014, 2.2 * vol_1h)
+                time_exit = held_hours >= float(self.v5_config.max_holding_hours)
+                reversal_exit = effective_bps < -10.0
+
+                if trailing_stop:
                     signal_label = "SELL"
-                    reason = "Previsão virou negativa (saída técnica)"
-                elif trailing_stop:
-                    signal_label = "SELL"
-                    reason = f"Trailing Stop acionado (travou lucro em {gross*100:+.2f}%)"
+                    reason = f"Trailing Stop acionado (pico {peak_gross*100:+.2f}%, realizou {gross*100:+.2f}%)"
                 elif hard_stop:
                     signal_label = "SELL"
-                    reason = f"Stop Loss acionado (proteção de capital em {gross*100:+.2f}%)"
+                    reason = f"Stop Loss técnico acionado ({gross*100:+.2f}%)"
+                elif time_exit:
+                    signal_label = "SELL"
+                    reason = f"Alvo temporal de {self.v5_config.max_holding_hours}h concluído ({gross*100:+.2f}%)"
+                elif reversal_exit:
+                    signal_label = "SELL"
+                    reason = f"Reversão de fluxo/modelo ({effective_bps:+.1f} bps)"
                 else:
                     signal_label = "HOLD"
-                    reason = f"Posição mantida (PnL aberto: {gross*100:+.2f}%)"
+                    reason = f"Posição ativa há {held_hours:.1f}h (PnL: {gross*100:+.2f}% | Pico: {peak_gross*100:+.2f}%)"
             else:
-                if effective > threshold:
-                    if vol_compressed:
-                        reason = "Filtro: compressão extrema de volatilidade"
+                if effective_bps > threshold_bps:
+                    if cooldown_active:
+                        reason = "Filtro: aguardando cooldown pós-trade (3h)"
+                    elif vol_compressed:
+                        reason = "Filtro: compressão de volatilidade (< 0.70)"
                     elif btc_dumping:
                         reason = "Filtro: queda macro abrupta no Bitcoin"
-                    elif alt_downtrend:
-                        reason = "Filtro: tendência de baixa estrutural"
-                    elif turbulent_chop:
-                        reason = "Filtro: ruído lateral turbulento sem CVD"
-                    elif sol_sideways:
-                        reason = "Filtro: Solana em range lateral sem momentum"
+                    elif weak_order_flow:
+                        reason = "Filtro: fluxo comprador CVD insuficiente"
+                    elif stretched_top:
+                        reason = "Filtro: preço esticado próximo ao topo de 24h"
                     else:
                         signal_label = "BUY"
-                        reason = f"Assimetria favorável ({effective*10_000:.1f} bps > {threshold*10_000:.1f} bps)"
+                        reason = (
+                            f"Entrada Swing 12h aprovada (Alpha {effective_bps:+.1f} bps > "
+                            f"{threshold_bps:.1f} bps | CVD 24h {cvd_24h:+.3f})"
+                        )
 
             signals.append(
                 PaperSignal(
                     asset=asset.value,
-                    prediction_bps=pred_mean * 10_000,
-                    effective_bps=effective * 10_000,
-                    threshold_bps=threshold * 10_000,
+                    prediction_bps=pred_mean_bps,
+                    effective_bps=effective_bps,
+                    threshold_bps=threshold_bps,
                     signal=signal_label,
                     reason=reason,
                     current_price=curr_price,
                     ewma_volatility_1h=vol_1h,
-                    pred_std_bps=pred_std * 10_000,
-                    member_preds_bps=[float(p * 10_000) for p in preds],
+                    pred_std_bps=pred_std_bps,
+                    member_preds_bps=[float(p * 10_000.0) for p in preds],
+                    flow_bps=flow_bps,
                     cvd_6h=cvd_6h,
+                    cvd_24h=cvd_24h,
+                    close_to_ema_24=close_to_ema_24,
                     close_to_ema_72=close_to_ema_72,
                     close_to_ema_168=close_to_ema_168,
+                    dist_high_24=dist_high_24,
                     vol_ratio=vol_ratio,
                     btc_24h_ret=btc_24h_ret,
                     filters={
                         "vol_compressed": bool(vol_compressed),
                         "btc_dumping": bool(btc_dumping),
-                        "alt_downtrend": bool(alt_downtrend),
-                        "turbulent_chop": bool(turbulent_chop),
-                        "sol_sideways": bool(sol_sideways),
+                        "weak_order_flow": bool(weak_order_flow),
+                        "stretched_top": bool(stretched_top),
+                        "cooldown_active": bool(cooldown_active),
                     },
                 )
             )
 
-        # 2. Execução simulada das ordens no banco de dados SQLite
-        from bottrade.domain import PaperFill, PaperOrder
+        # 2. Execução simulada das ordens (Estado JSON + SQLite)
         order_fills: list[tuple[PaperOrder, PaperFill]] = []
 
         for sig in signals:
             asset_enum = Asset(sig.asset)
-            pos = positions.get(asset_enum)
-            has_pos = pos is not None and float(pos.quantity) > 0
+            pos_info = positions_state.get(sig.asset)
+            has_pos = pos_info is not None and float(pos_info.get("quantity", 0.0)) > 0.0
 
             if sig.signal == "BUY" and not has_pos and cash >= 100.0:
-                trade_notional = min(cash * 0.30, 300.0)
+                trade_notional = min(cash * 0.33, 330.0)
                 qty = trade_notional / sig.current_price
-                fee = trade_notional * (self.v5_config.round_trip_bps / 20_000.0)  # 12 bps taker entry
+                fee = trade_notional * (self.v5_config.round_trip_bps / 20_000.0)
                 order_id = f"v5-{asset_enum.value}-BUY-{now_utc.strftime('%Y%m%d%H%M%S')}"
                 order = PaperOrder(
                     client_order_id=order_id,
@@ -295,7 +365,7 @@ class PaperTradingV5:
                     side="BUY",
                     quantity=Decimal(f"{qty:.6f}"),
                     reference_price=Decimal(f"{sig.current_price:.4f}"),
-                    reason=sig.reason,
+                    reason=sig.reason[:120],
                 )
                 fill = PaperFill(
                     client_order_id=order_id,
@@ -314,11 +384,25 @@ class PaperTradingV5:
                     impact_bps=0.0,
                 )
                 order_fills.append((order, fill))
-                cash -= (trade_notional + fee)
-            elif sig.signal == "SELL" and has_pos:
-                qty = float(pos.quantity)
+                cash -= trade_notional + fee
+                positions_state[sig.asset] = {
+                    "asset": sig.asset,
+                    "quantity": round(qty, 6),
+                    "entry_price": round(sig.current_price, 4),
+                    "peak_price": round(sig.current_price, 4),
+                    "notional_usdt": round(trade_notional, 2),
+                    "entry_fee_usdt": round(fee, 4),
+                    "opened_at": now_utc.isoformat(),
+                    "entry_effective_bps": round(sig.effective_bps, 2),
+                    "entry_reason": sig.reason,
+                }
+            elif sig.signal == "SELL" and has_pos and pos_info is not None:
+                qty = float(pos_info["quantity"])
+                entry_p = float(pos_info["entry_price"])
+                entry_notional = float(pos_info.get("notional_usdt", qty * entry_p))
+                entry_fee = float(pos_info.get("entry_fee_usdt", entry_notional * 0.0012))
                 notional = qty * sig.current_price
-                fee = notional * (self.v5_config.round_trip_bps / 20_000.0)  # 12 bps taker exit
+                exit_fee = notional * (self.v5_config.round_trip_bps / 20_000.0)
                 order_id = f"v5-{asset_enum.value}-SELL-{now_utc.strftime('%Y%m%d%H%M%S')}"
                 order = PaperOrder(
                     client_order_id=order_id,
@@ -328,7 +412,7 @@ class PaperTradingV5:
                     side="SELL",
                     quantity=Decimal(f"{qty:.6f}"),
                     reference_price=Decimal(f"{sig.current_price:.4f}"),
-                    reason=sig.reason,
+                    reason=sig.reason[:120],
                 )
                 fill = PaperFill(
                     client_order_id=order_id,
@@ -338,7 +422,7 @@ class PaperTradingV5:
                     side="SELL",
                     quantity=Decimal(f"{qty:.6f}"),
                     price=Decimal(f"{sig.current_price:.4f}"),
-                    fee=Decimal(f"{fee:.6f}"),
+                    fee=Decimal(f"{exit_fee:.6f}"),
                     bid=Decimal(f"{sig.current_price * 0.9998:.4f}"),
                     ask=Decimal(f"{sig.current_price * 1.0002:.4f}"),
                     visible_depth_quantity=Decimal("10.0"),
@@ -347,7 +431,36 @@ class PaperTradingV5:
                     impact_bps=0.0,
                 )
                 order_fills.append((order, fill))
-                cash += (notional - fee)
+                cash += notional - exit_fee
+
+                net_pnl_usdt = (notional - exit_fee) - (entry_notional + entry_fee)
+                gross_pct = (sig.current_price / entry_p - 1.0) * 100.0 if entry_p > 0 else 0.0
+                net_pct = gross_pct - (self.v5_config.round_trip_bps / 100.0)
+
+                state["realized_pnl_usdt"] = round(float(state.get("realized_pnl_usdt", 0.0)) + net_pnl_usdt, 4)
+                state["closed_trades_count"] = int(state.get("closed_trades_count", 0)) + 1
+                if net_pnl_usdt > 0:
+                    state["winning_trades_count"] = int(state.get("winning_trades_count", 0)) + 1
+
+                trade_record = {
+                    "asset": sig.asset,
+                    "opened_at": pos_info.get("opened_at", ""),
+                    "closed_at": now_utc.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                    "entry_price": round(entry_p, 4),
+                    "exit_price": round(sig.current_price, 4),
+                    "quantity": round(qty, 6),
+                    "gross_pnl_pct": round(gross_pct, 2),
+                    "net_pnl_pct": round(net_pct, 2),
+                    "net_pnl_usdt": round(net_pnl_usdt, 2),
+                    "exit_reason": sig.reason,
+                }
+                trade_history.insert(0, trade_record)
+                state["trade_history"] = trade_history[:50]
+                last_exits[sig.asset] = now_utc.isoformat()
+                positions_state.pop(sig.asset, None)
+
+        state["cash"] = round(cash, 4)
+        self._save_portfolio_state(state)
 
         for o, f in order_fills:
             with contextlib.suppress(Exception):
@@ -356,102 +469,125 @@ class PaperTradingV5:
         return signals
 
     def get_status_summary(self, signals: list[PaperSignal]) -> str:
-        """Gera o painel de telemetria em formato markdown/ASCII para terminal."""
-        from bottrade.storage import LedgerRow
-        with self.storage.session() as session:
-            ledger_obj = session.get(LedgerRow, self.ledger_name)
-            cash = float(ledger_obj.cash) if ledger_obj else 1000.0
-        pos_list = self.storage.positions(self.ledger_name)
-        now_str = utc_now().strftime("%Y-%m-%d %H:%M:%S UTC")
+        """Gera o painel de telemetria em formato markdown/ASCII para terminal e Telegram."""
+        state = self._load_portfolio_state()
+        cash = float(state.get("cash", 1000.0))
+        positions_state: dict[str, dict[str, Any]] = state.get("positions", {})
+        closed_count = int(state.get("closed_trades_count", 0))
+        win_count = int(state.get("winning_trades_count", 0))
+        realized_pnl = float(state.get("realized_pnl_usdt", 0.0))
+        win_rate = (win_count / closed_count * 100.0) if closed_count > 0 else 0.0
 
+        now_str = utc_now().strftime("%Y-%m-%d %H:%M:%S UTC")
         price_map = {s.asset: s.current_price for s in signals}
-        pos_value = sum(float(p.quantity) * price_map.get(p.asset.value, float(p.average_price)) for p in pos_list)
+        pos_value = sum(
+            float(p["quantity"]) * price_map.get(asset_k, float(p["entry_price"]))
+            for asset_k, p in positions_state.items()
+            if float(p.get("quantity", 0.0)) > 0
+        )
         total_equity = cash + pos_value
         pnl_pct = (total_equity / 1000.0 - 1.0) * 100.0
 
         lines = [
-            "=" * 65,
-            "  [BOT] BOTTRADE V5 - PAPER TRADING ENGINE (ONLINE)",
+            "=" * 68,
+            "  [BOT] BOTTRADE V5.1 - SWING 12H & CVD ENGINE (ONLINE)",
             f"  Timestamp: {now_str} | Ledger: {self.ledger_name}",
-            "=" * 65,
+            "=" * 68,
             f"  Patrimonio Liquido Total: ${total_equity:,.2f} USDT ({pnl_pct:+.2f}%)",
             f"  Caixa Disponivel:        ${cash:,.2f} USDT",
             f"  Capital em Posicoes:     ${pos_value:,.2f} USDT",
-            "-" * 65,
-            "  SINAIS & MODELOS EM TEMPO REAL (XGBoost Institucional):",
+            f"  Trades Fechados:         {closed_count} (Win Rate: {win_rate:.1f}% | PnL Realizado: ${realized_pnl:+.2f})",
+            "-" * 68,
+            "  SINAIS & ALPHA COMPOSTO 12H (XGBoost + Order Flow CVD):",
         ]
 
         for s in signals:
-            icon = "[COMPRA]" if s.signal == "BUY" else ("[VENDA]" if s.signal == "SELL" else ("[HOLD]" if s.signal == "HOLD" else "[CAIXA]"))
+            icon = (
+                "[COMPRA]"
+                if s.signal == "BUY"
+                else ("[VENDA]" if s.signal == "SELL" else ("[HOLD]" if s.signal == "HOLD" else "[CAIXA]"))
+            )
             lines.append(
                 f"  {icon:<8} {s.asset:<7} | Preco: ${s.current_price:>10,.2f} | Sinal: {s.signal:<4} | "
-                f"Pred: {s.effective_bps:>+5.1f} bps (Gate: {s.threshold_bps:.1f}) | {s.reason}"
+                f"Alpha: {s.effective_bps:>+5.1f} bps (ML:{s.prediction_bps:+.1f} Flow:{s.flow_bps:+.1f} Gate:{s.threshold_bps:.0f}) | {s.reason}"
             )
 
         lines.extend([
-            "-" * 65,
+            "-" * 68,
             "  POSICOES ATIVAS NA CARTEIRA:",
         ])
 
-        active_positions = [p for p in pos_list if float(p.quantity) > 0]
+        active_positions = [p for p in positions_state.values() if float(p.get("quantity", 0.0)) > 0]
         if not active_positions:
-            lines.append("  (Nenhuma posicao aberta; capital 100% preservado em caixa USDT)")
+            lines.append("  (Nenhuma posicao aberta no momento; aguardando gatilho de assimetria)")
         else:
             for p in active_positions:
-                cur_p = price_map.get(p.asset.value, float(p.average_price))
-                entry_p = float(p.average_price)
+                asset_name = str(p["asset"])
+                cur_p = price_map.get(asset_name, float(p["entry_price"]))
+                entry_p = float(p["entry_price"])
+                peak_p = float(p.get("peak_price", entry_p))
                 gross_pnl = (cur_p / entry_p - 1.0) * 100.0 if entry_p > 0 else 0.0
                 lines.append(
-                    f"  [POS] {p.asset.value:<7} | Qtd: {float(p.quantity):.4f} | Entrada: ${entry_p:,.2f} | "
-                    f"Atual: ${cur_p:,.2f} | PnL Aberto: {gross_pnl:+.2f}%"
+                    f"  [POS] {asset_name:<7} | Qtd: {float(p['quantity']):.4f} | Entrada: ${entry_p:,.2f} | "
+                    f"Atual: ${cur_p:,.2f} | Pico: ${peak_p:,.2f} | PnL Aberto: {gross_pnl:+.2f}%"
                 )
 
-        lines.append("=" * 65)
+        lines.append("=" * 68)
         return "\n".join(lines)
 
     def notify_channels(self, signals: list[PaperSignal], text_summary: str) -> None:
         """Envia notificações via Telegram, GitHub Step Summary e grava reports/LIVE_DASHBOARD.md."""
-        import os
-        from pathlib import Path
-
-        # 1. Enviar mensagem de texto no Telegram se configurado
         if self.alerter.configured:
             self.alerter.send(text_summary)
 
-        # 2. Gerar relatório visual em Markdown
-        cash = 1000.0
-        with self.storage.session() as session:
-            from bottrade.storage import LedgerRow
-            ledger_obj = session.get(LedgerRow, self.ledger_name)
-            if ledger_obj:
-                cash = float(ledger_obj.cash)
+        state = self._load_portfolio_state()
+        cash = float(state.get("cash", 1000.0))
+        positions_state: dict[str, dict[str, Any]] = state.get("positions", {})
+        trade_history: list[dict[str, Any]] = state.get("trade_history", [])
+        closed_count = int(state.get("closed_trades_count", 0))
+        win_count = int(state.get("winning_trades_count", 0))
+        realized_pnl = float(state.get("realized_pnl_usdt", 0.0))
+        win_rate = (win_count / closed_count * 100.0) if closed_count > 0 else 0.0
 
-        pos_list = self.storage.positions(self.ledger_name)
         now_str = utc_now().strftime("%Y-%m-%d %H:%M:%S UTC")
         price_map = {s.asset: s.current_price for s in signals}
-        pos_value = sum(float(p.quantity) * price_map.get(p.asset.value, float(p.average_price)) for p in pos_list)
+        pos_value = sum(
+            float(p["quantity"]) * price_map.get(asset_k, float(p["entry_price"]))
+            for asset_k, p in positions_state.items()
+            if float(p.get("quantity", 0.0)) > 0
+        )
         total_equity = cash + pos_value
         pnl_pct = (total_equity / 1000.0 - 1.0) * 100.0
 
         md_lines = [
-            "# 🤖 BOTTRADE V5 - Painel Oficial de Paper Trading",
+            "# 🤖 BOTTRADE V5.1 - Painel Oficial de Paper Trading (Swing 12h + CVD)",
             f"**Ultima Atualizacao**: `{now_str}` | **Ledger**: `{self.ledger_name}` | **Status**: 🟢 **ONLINE**",
             "",
             "## 💰 Resumo da Carteira",
             f"- **Patrimonio Liquido Total**: **${total_equity:,.2f} USDT** (`{pnl_pct:+.2f}%`)",
             f"- **Caixa Disponivel**: **${cash:,.2f} USDT**",
             f"- **Capital em Posicoes**: **${pos_value:,.2f} USDT**",
+            f"- **Trades Realizados**: **{closed_count}** | **Taxa de Acerto (Win Rate)**: **{win_rate:.1f}%** | **PnL Realizado**: **${realized_pnl:+.2f} USDT**",
             "",
-            "## 📊 Sinais e Previsoes em Tempo Real (XGBoost Institucional)",
+            "## 📊 Sinais e Previsoes em Tempo Real (Horizonte 12h + Order Flow CVD)",
             "",
-            "| Ativo | Preco Atual | Sinal | Previsao | Gate Custo | Status / Diagnostico |",
-            "|:---|---:|:---:|---:|---:|:---|",
+            "| Ativo | Preco Atual | Sinal | Alpha Efetivo (12h) | ML 12h | Impulso CVD | Gate Custo | Status / Diagnostico |",
+            "|:---|---:|:---:|---:|---:|---:|---:|:---|",
         ]
 
         for s in signals:
-            badge = "🟢 **BUY**" if s.signal == "BUY" else ("🔴 **SELL**" if s.signal == "SELL" else ("🟡 **HOLD**" if s.signal == "HOLD" else "⚪ **CASH**"))
+            badge = (
+                "🟢 **BUY**"
+                if s.signal == "BUY"
+                else (
+                    "🔴 **SELL**"
+                    if s.signal == "SELL"
+                    else ("🟡 **HOLD**" if s.signal == "HOLD" else "⚪ **CASH**")
+                )
+            )
             md_lines.append(
-                f"| **{s.asset}** | ${s.current_price:,.2f} | {badge} | {s.effective_bps:+.1f} bps | {s.threshold_bps:.1f} bps | {s.reason} |"
+                f"| **{s.asset}** | ${s.current_price:,.2f} | {badge} | **{s.effective_bps:+.1f} bps** | "
+                f"{s.prediction_bps:+.1f} bps | {s.flow_bps:+.1f} bps | {s.threshold_bps:.1f} bps | {s.reason} |"
             )
 
         md_lines.extend([
@@ -460,18 +596,38 @@ class PaperTradingV5:
             "",
         ])
 
-        active_positions = [p for p in pos_list if float(p.quantity) > 0]
+        active_positions = [p for p in positions_state.values() if float(p.get("quantity", 0.0)) > 0]
         if not active_positions:
-            md_lines.append("> *Nenhuma posicao aberta no momento. Capital 100% preservado em caixa USDT aguardando assimetria favoravel.*")
+            md_lines.append(
+                "> *Nenhuma posicao aberta no momento. Aguardando alinhamento de Alpha 12h > 24.0 bps com fluxo comprador CVD.*"
+            )
         else:
-            md_lines.append("| Ativo | Quantidade | Preco Entrada | Preco Atual | PnL Aberto (%) |")
-            md_lines.append("|:---|---:|---:|---:|---:|")
+            md_lines.append("| Ativo | Quantidade | Preco Entrada | Preco Atual | Pico Atingido | PnL Aberto (%) |")
+            md_lines.append("|:---|---:|---:|---:|---:|---:|")
             for p in active_positions:
-                cur_p = price_map.get(p.asset.value, float(p.average_price))
-                entry_p = float(p.average_price)
+                asset_name = str(p["asset"])
+                cur_p = price_map.get(asset_name, float(p["entry_price"]))
+                entry_p = float(p["entry_price"])
+                peak_p = float(p.get("peak_price", entry_p))
                 gross_pnl = (cur_p / entry_p - 1.0) * 100.0 if entry_p > 0 else 0.0
                 md_lines.append(
-                    f"| **{p.asset.value}** | {float(p.quantity):.4f} | ${entry_p:,.2f} | ${cur_p:,.2f} | `{gross_pnl:+.2f}%` |"
+                    f"| **{asset_name}** | {float(p['quantity']):.4f} | ${entry_p:,.2f} | "
+                    f"${cur_p:,.2f} | ${peak_p:,.2f} | `{gross_pnl:+.2f}%` |"
+                )
+
+        if trade_history:
+            md_lines.extend([
+                "",
+                "## 🏆 Historico Recente de Operacoes Fechadas",
+                "",
+                "| Ativo | Abertura | Fechamento | Entrada | Saida | PnL Liquido (%) | PnL (USDT) | Motivo da Saida |",
+                "|:---|:---|:---|---:|---:|---:|---:|:---|",
+            ])
+            for tr in trade_history[:10]:
+                md_lines.append(
+                    f"| **{tr['asset']}** | `{str(tr['opened_at'])[:16]}` | `{str(tr['closed_at'])[:16]}` | "
+                    f"${float(tr['entry_price']):,.2f} | ${float(tr['exit_price']):,.2f} | "
+                    f"**`{float(tr['net_pnl_pct']):+.2f}%`** | `${float(tr['net_pnl_usdt']):+.2f}` | {tr['exit_reason']} |"
                 )
 
         md_content = "\n".join(md_lines) + "\n"
@@ -480,13 +636,12 @@ class PaperTradingV5:
         dashboard_file.parent.mkdir(parents=True, exist_ok=True)
         dashboard_file.write_text(md_content, encoding="utf-8")
 
-        # 3. Gravar log estruturado e livro de auditoria detalhado
         self._save_decision_audit(
             signals=signals,
             now_str=now_str,
             total_equity=total_equity,
             cash=cash,
-            pos_list=pos_list,
+            active_positions=active_positions,
         )
 
         summary_env = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -500,16 +655,12 @@ class PaperTradingV5:
         now_str: str,
         total_equity: float,
         cash: float,
-        pos_list: list[Any],
+        active_positions: list[dict[str, Any]],
     ) -> None:
         """Salva histórico auditável completo em JSONL e Markdown detalhado."""
-        import json
-        from pathlib import Path
-
         reports_dir = Path("reports")
         reports_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Registro JSONL compacto para análise programática
         jsonl_path = reports_dir / "decisions.jsonl"
         cycle_record = {
             "timestamp": now_str,
@@ -522,42 +673,34 @@ class PaperTradingV5:
                     "signal": s.signal,
                     "effective_bps": round(s.effective_bps, 2),
                     "pred_mean_bps": round(s.prediction_bps, 2),
+                    "flow_bps": round(s.flow_bps, 2),
                     "pred_std_bps": round(s.pred_std_bps, 2),
                     "threshold_bps": round(s.threshold_bps, 2),
                     "member_preds_bps": [round(p, 2) for p in s.member_preds_bps],
                     "cvd_6h": round(s.cvd_6h, 4),
+                    "cvd_24h": round(s.cvd_24h, 4),
                     "vol_1h": round(s.ewma_volatility_1h, 4),
                     "vol_ratio": round(s.vol_ratio, 2),
+                    "close_to_ema_24": round(s.close_to_ema_24, 4),
                     "close_to_ema_72": round(s.close_to_ema_72, 4),
                     "close_to_ema_168": round(s.close_to_ema_168, 4),
+                    "dist_high_24": round(s.dist_high_24, 4),
                     "btc_24h_ret": round(s.btc_24h_ret, 4),
                     "filters": s.filters,
                     "reason": s.reason,
                 }
                 for s in signals
             ],
-            "active_positions": [
-                {
-                    "asset": p.asset.value,
-                    "quantity": float(p.quantity),
-                    "average_price": float(p.average_price),
-                }
-                for p in pos_list
-                if float(p.quantity) > 0
-            ],
+            "active_positions": active_positions,
         }
         with open(jsonl_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(cycle_record, ensure_ascii=False) + "\n")
 
-        # 2. Livro de Auditoria Humana (reports/DECISION_AUDIT.md)
         audit_file = reports_dir / "DECISION_AUDIT.md"
         existing_content = audit_file.read_text(encoding="utf-8") if audit_file.exists() else ""
 
         header_marker = "<!-- AUDIT_START -->\n"
-        if header_marker in existing_content:
-            old_body = existing_content.split(header_marker, 1)[1]
-        else:
-            old_body = ""
+        old_body = existing_content.split(header_marker, 1)[1] if header_marker in existing_content else ""
 
         old_blocks = [b.strip() for b in old_body.split("\n---\n") if b.strip()]
         kept_blocks = old_blocks[:35]
@@ -565,8 +708,8 @@ class PaperTradingV5:
         new_block_lines = [
             f"### 🕒 Ciclo `{now_str}` | Patrimônio: **${total_equity:,.2f} USDT** (Caixa: `${cash:,.2f}`)",
             "",
-            "| Ativo | Preço | Sinal | Previsão Líquida | Consenso 5x XGBoost | Order Flow (CVD 6h) | Volatilidade | Filtros de Risco | Racional Quantitativo |",
-            "|:---|---:|:---:|---:|:---|:---:|:---:|:---|:---|",
+            "| Ativo | Preço | Sinal | Alpha 12h Efetivo | ML 12h | Order Flow (CVD 24h/6h) | Volatilidade | Filtros de Risco | Racional Quantitativo |",
+            "|:---|---:|:---:|---:|---:|:---:|:---:|:---|:---|",
         ]
         for s in signals:
             badge = (
@@ -578,19 +721,19 @@ class PaperTradingV5:
                     else ("🟡 **HOLD**" if s.signal == "HOLD" else "⚪ **CASH**")
                 )
             )
-            preds_str = f"[{', '.join(f'{p:+.1f}' for p in s.member_preds_bps)}]"
             active_filters = [f"`{k}`" for k, v in s.filters.items() if v]
             flt_str = " ".join(active_filters) if active_filters else "Liberado ✅"
             new_block_lines.append(
-                f"| **{s.asset}** | ${s.current_price:,.2f} | {badge} | **{s.effective_bps:+.1f} bps** (±{s.pred_std_bps:.1f}) | `{preds_str}` | `{s.cvd_6h:+.3f}` | `{s.ewma_volatility_1h*100:.2f}%/h` | {flt_str} | {s.reason} |"
+                f"| **{s.asset}** | ${s.current_price:,.2f} | {badge} | **{s.effective_bps:+.1f} bps** (±{s.pred_std_bps:.1f}) | "
+                f"`{s.prediction_bps:+.1f} bps` | `{s.cvd_24h:+.3f} / {s.cvd_6h:+.3f}` | `{s.ewma_volatility_1h*100:.2f}%/h` | {flt_str} | {s.reason} |"
             )
 
         new_block = "\n".join(new_block_lines)
 
         header = (
-            "# 📋 BOT_TRADE V5 — Livro de Auditoria de Decisões e Análise de Mercado\n\n"
+            "# 📋 BOT_TRADE V5.1 — Livro de Auditoria de Decisões e Análise de Mercado (Swing 12h + CVD)\n\n"
             "Este documento registra o histórico contínuo das decisões tomadas pelo algoritmo a cada ciclo em tempo real na Binance.\n"
-            "Ele permite auditar o consenso dos 5 modelos XGBoost, o comportamento do CVD (Cumulative Volume Delta) e o disparo de travas de risco.\n\n"
+            "Ele permite auditar o Alpha Composto de 12h (Ensemble 5x XGBoost + Order Flow CVD) e o disparo de travas de proteção.\n\n"
             f"**Última Atualização**: `{now_str}` | **Ledger**: `{self.ledger_name}`\n\n"
             f"{header_marker}"
         )

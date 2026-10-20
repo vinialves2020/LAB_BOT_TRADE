@@ -1,7 +1,7 @@
-# 📋 BOT_TRADE V5 — Livro de Auditoria de Decisões e Análise de Mercado
+# 📋 BOT_TRADE V5.1 — Livro de Auditoria de Decisões e Análise de Mercado (Swing 12h + CVD)
 
 Este documento registra o histórico contínuo das decisões tomadas pelo algoritmo a cada ciclo em tempo real na Binance.
-Ele permite auditar o consenso dos 5 modelos XGBoost, o comportamento do CVD (Cumulative Volume Delta) e o disparo de travas de risco.
+Ele permite auditar o Alpha Composto de 12h (Ensemble 5x XGBoost + Order Flow CVD) e o disparo de travas de proteção.
 
 **Última Atualização**: `2026-10-20 18:47:03 UTC` | **Ledger**: `paper_1000`
 
