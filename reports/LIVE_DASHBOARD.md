@@ -1,25 +1,25 @@
 # 🤖 BOTTRADE V5.1 - Painel Oficial de Paper Trading (Swing 12h + CVD)
-**Ultima Atualizacao**: `2026-10-21 22:16:54 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+**Ultima Atualizacao**: `2026-10-21 22:32:12 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
 ## 💰 Resumo da Carteira
-- **Patrimonio Liquido Total**: **$999.91 USDT** (`-0.01%`)
+- **Patrimonio Liquido Total**: **$999.73 USDT** (`-0.03%`)
 - **Caixa Disponivel**: **$669.53 USDT**
-- **Capital em Posicoes**: **$330.38 USDT**
+- **Capital em Posicoes**: **$330.20 USDT**
 - **Trades Realizados**: **2** | **Taxa de Acerto (Win Rate)**: **50.0%** | **PnL Realizado**: **$-0.11 USDT**
 
 ## 📊 Sinais e Previsoes em Tempo Real (Horizonte 12h + Order Flow CVD)
 
 | Ativo | Preco Atual | Sinal | Alpha Efetivo (12h) | ML 12h | Impulso CVD | Gate Custo | Status / Diagnostico |
 |:---|---:|:---:|---:|---:|---:|---:|:---|
-| **BTCUSDT** | $84,723.10 | ⚪ **CASH** | **-4.3 bps** | +1.2 bps | -9.7 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
-| **ETHUSDT** | $2,493.16 | 🟡 **HOLD** | **+10.5 bps** | +15.9 bps | +5.0 bps | 24.0 bps | Posição ativa há 3.2h (PnL: +0.13% | Pico: +0.40%) |
-| **SOLUSDT** | $107.89 | ⚪ **CASH** | **+13.3 bps** | +13.2 bps | +16.4 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
+| **BTCUSDT** | $84,670.00 | ⚪ **CASH** | **-4.3 bps** | +1.2 bps | -9.7 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
+| **ETHUSDT** | $2,491.78 | 🟡 **HOLD** | **+10.5 bps** | +15.9 bps | +5.0 bps | 24.0 bps | Posição ativa há 3.5h (PnL: +0.07% | Pico: +0.40%) |
+| **SOLUSDT** | $107.80 | ⚪ **CASH** | **+13.3 bps** | +13.2 bps | +16.4 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
 
 ## 📈 Posicoes Abertas
 
 | Ativo | Quantidade | Preco Entrada | Preco Atual | Pico Atingido | PnL Aberto (%) |
 |:---|---:|---:|---:|---:|---:|
-| **ETHUSDT** | 0.1325 | $2,489.99 | $2,493.16 | $2,499.94 | `+0.13%` |
+| **ETHUSDT** | 0.1325 | $2,489.99 | $2,491.78 | $2,499.94 | `+0.07%` |
 
 ## 🏆 Historico Recente de Operacoes Fechadas
 
