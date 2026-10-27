@@ -1,11 +1,23 @@
 {
   "ledger": "paper_1000",
   "initial_cash": 1000.0,
-  "cash": 993.642,
+  "cash": 665.3467,
   "realized_pnl_usdt": -6.3609,
   "closed_trades_count": 4,
   "winning_trades_count": 1,
-  "positions": {},
+  "positions": {
+    "ETHUSDT": {
+      "asset": "ETHUSDT",
+      "quantity": 0.141508,
+      "entry_price": 2317.2,
+      "peak_price": 2317.2,
+      "notional_usdt": 327.9,
+      "entry_fee_usdt": 0.3935,
+      "opened_at": "2026-10-27T14:02:15.164511+00:00",
+      "entry_effective_bps": 40.82,
+      "entry_reason": "Entrada Swing 12h aprovada (Alpha +40.8 bps > 24.0 bps | CVD 24h +0.089)"
+    }
+  },
   "last_exit_times": {
     "ETHUSDT": "2026-10-27T08:02:27.477816+00:00",
     "SOLUSDT": "2026-10-21T02:02:09.526950+00:00"
