@@ -1,28 +1,28 @@
 {
   "ledger": "paper_1000",
   "initial_cash": 1000.0,
-  "cash": 665.7994,
-  "realized_pnl_usdt": -5.6797,
-  "closed_trades_count": 3,
+  "cash": 993.642,
+  "realized_pnl_usdt": -6.3609,
+  "closed_trades_count": 4,
   "winning_trades_count": 1,
-  "positions": {
-    "ETHUSDT": {
-      "asset": "ETHUSDT",
-      "quantity": 0.141673,
-      "entry_price": 2316.07,
-      "peak_price": 2330.73,
-      "notional_usdt": 328.13,
-      "entry_fee_usdt": 0.3938,
-      "opened_at": "2026-10-26T20:02:17.135792+00:00",
-      "entry_effective_bps": 30.05,
-      "entry_reason": "Entrada Swing 12h aprovada (Alpha +30.1 bps > 24.0 bps | CVD 24h +0.019)"
-    }
-  },
+  "positions": {},
   "last_exit_times": {
-    "ETHUSDT": "2026-10-22T02:02:09.725785+00:00",
+    "ETHUSDT": "2026-10-27T08:02:27.477816+00:00",
     "SOLUSDT": "2026-10-21T02:02:09.526950+00:00"
   },
   "trade_history": [
+    {
+      "asset": "ETHUSDT",
+      "opened_at": "2026-10-26T20:02:17.135792+00:00",
+      "closed_at": "2026-10-27 08:02:27 UTC",
+      "entry_price": 2316.07,
+      "exit_price": 2316.86,
+      "quantity": 0.141673,
+      "gross_pnl_pct": 0.03,
+      "net_pnl_pct": -0.21,
+      "net_pnl_usdt": -0.68,
+      "exit_reason": "Alvo temporal de 12h concluído (+0.03%)"
+    },
     {
       "asset": "ETHUSDT",
       "opened_at": "2026-10-21T19:02:09.390750+00:00",
