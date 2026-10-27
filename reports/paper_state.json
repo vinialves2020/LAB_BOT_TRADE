@@ -1,7 +1,7 @@
 {
   "ledger": "paper_1000",
   "initial_cash": 1000.0,
-  "cash": 665.3467,
+  "cash": 445.5188,
   "realized_pnl_usdt": -6.3609,
   "closed_trades_count": 4,
   "winning_trades_count": 1,
@@ -16,6 +16,17 @@
       "opened_at": "2026-10-27T14:02:15.164511+00:00",
       "entry_effective_bps": 40.82,
       "entry_reason": "Entrada Swing 12h aprovada (Alpha +40.8 bps > 24.0 bps | CVD 24h +0.089)"
+    },
+    "BTCUSDT": {
+      "asset": "BTCUSDT",
+      "quantity": 0.002726,
+      "entry_price": 80544.86,
+      "peak_price": 80544.86,
+      "notional_usdt": 219.56,
+      "entry_fee_usdt": 0.2635,
+      "opened_at": "2026-10-27T16:02:05.634638+00:00",
+      "entry_effective_bps": 27.43,
+      "entry_reason": "Entrada Swing 12h aprovada (Alpha +27.4 bps > 24.0 bps | CVD 24h +0.162)"
     }
   },
   "last_exit_times": {
