@@ -1,23 +1,25 @@
 # 🤖 BOTTRADE V5.1 - Painel Oficial de Paper Trading (Swing 12h + CVD)
-**Ultima Atualizacao**: `2026-10-28 09:47:03 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+**Ultima Atualizacao**: `2026-10-28 10:02:10 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
 ## 💰 Resumo da Carteira
-- **Patrimonio Liquido Total**: **$999.00 USDT** (`-0.10%`)
-- **Caixa Disponivel**: **$999.00 USDT**
-- **Capital em Posicoes**: **$0.00 USDT**
+- **Patrimonio Liquido Total**: **$998.60 USDT** (`-0.14%`)
+- **Caixa Disponivel**: **$668.94 USDT**
+- **Capital em Posicoes**: **$329.67 USDT**
 - **Trades Realizados**: **6** | **Taxa de Acerto (Win Rate)**: **50.0%** | **PnL Realizado**: **$-0.99 USDT**
 
 ## 📊 Sinais e Previsoes em Tempo Real (Horizonte 12h + Order Flow CVD)
 
 | Ativo | Preco Atual | Sinal | Alpha Efetivo (12h) | ML 12h | Impulso CVD | Gate Custo | Status / Diagnostico |
 |:---|---:|:---:|---:|---:|---:|---:|:---|
-| **BTCUSDT** | $81,527.81 | ⚪ **CASH** | **+40.1 bps** | +38.5 bps | +44.0 bps | 24.0 bps | Filtro: preço esticado próximo ao topo de 24h |
-| **ETHUSDT** | $2,372.05 | ⚪ **CASH** | **+16.3 bps** | +10.7 bps | +24.8 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
-| **SOLUSDT** | $102.85 | ⚪ **CASH** | **+12.9 bps** | +0.1 bps | +32.8 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
+| **BTCUSDT** | $81,559.88 | 🟢 **BUY** | **+41.6 bps** | +42.4 bps | +43.2 bps | 24.0 bps | Entrada Swing 12h aprovada (Alpha +41.6 bps > 24.0 bps | CVD 24h +0.194) |
+| **ETHUSDT** | $2,374.74 | ⚪ **CASH** | **+6.5 bps** | -5.4 bps | +22.7 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
+| **SOLUSDT** | $103.09 | ⚪ **CASH** | **+11.1 bps** | -2.7 bps | +34.9 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
 
 ## 📈 Posicoes Abertas
 
-> *Nenhuma posicao aberta no momento. Aguardando alinhamento de Alpha 12h > 24.0 bps com fluxo comprador CVD.*
+| Ativo | Quantidade | Preco Entrada | Preco Atual | Pico Atingido | PnL Aberto (%) |
+|:---|---:|---:|---:|---:|---:|
+| **BTCUSDT** | 0.0040 | $81,559.88 | $81,559.88 | $81,559.88 | `+0.00%` |
 
 ## 🏆 Historico Recente de Operacoes Fechadas
 
