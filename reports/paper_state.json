@@ -1,7 +1,7 @@
 {
   "ledger": "paper_1000",
   "initial_cash": 1000.0,
-  "cash": 668.9371,
+  "cash": 447.923,
   "realized_pnl_usdt": -0.9926,
   "closed_trades_count": 6,
   "winning_trades_count": 3,
@@ -16,6 +16,17 @@
       "opened_at": "2026-10-28T10:02:09.011990+00:00",
       "entry_effective_bps": 41.64,
       "entry_reason": "Entrada Swing 12h aprovada (Alpha +41.6 bps > 24.0 bps | CVD 24h +0.194)"
+    },
+    "SOLUSDT": {
+      "asset": "SOLUSDT",
+      "quantity": 2.161665,
+      "entry_price": 102.12,
+      "peak_price": 102.12,
+      "notional_usdt": 220.75,
+      "entry_fee_usdt": 0.2649,
+      "opened_at": "2026-10-28T19:02:44.871652+00:00",
+      "entry_effective_bps": 41.77,
+      "entry_reason": "Entrada Swing 12h aprovada (Alpha +41.8 bps > 24.0 bps | CVD 24h +0.127)"
     }
   },
   "last_exit_times": {
