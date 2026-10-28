@@ -1,5 +1,5 @@
 # 🤖 BOTTRADE V5.1 - Painel Oficial de Paper Trading (Swing 12h + CVD)
-**Ultima Atualizacao**: `2026-10-28 04:32:03 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+**Ultima Atualizacao**: `2026-10-28 04:47:02 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
 ## 💰 Resumo da Carteira
 - **Patrimonio Liquido Total**: **$999.00 USDT** (`-0.10%`)
@@ -11,9 +11,9 @@
 
 | Ativo | Preco Atual | Sinal | Alpha Efetivo (12h) | ML 12h | Impulso CVD | Gate Custo | Status / Diagnostico |
 |:---|---:|:---:|---:|---:|---:|---:|:---|
-| **BTCUSDT** | $81,036.11 | ⚪ **CASH** | **+37.0 bps** | +36.3 bps | +40.7 bps | 24.0 bps | Filtro: aguardando cooldown pós-trade (3h) |
-| **ETHUSDT** | $2,356.47 | ⚪ **CASH** | **+7.7 bps** | -6.5 bps | +26.1 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
-| **SOLUSDT** | $101.93 | ⚪ **CASH** | **+10.4 bps** | +0.1 bps | +28.3 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
+| **BTCUSDT** | $81,032.02 | ⚪ **CASH** | **+37.0 bps** | +36.3 bps | +40.7 bps | 24.0 bps | Filtro: aguardando cooldown pós-trade (3h) |
+| **ETHUSDT** | $2,358.67 | ⚪ **CASH** | **+7.7 bps** | -6.5 bps | +26.1 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
+| **SOLUSDT** | $102.22 | ⚪ **CASH** | **+10.4 bps** | +0.1 bps | +28.3 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
 
 ## 📈 Posicoes Abertas
 
