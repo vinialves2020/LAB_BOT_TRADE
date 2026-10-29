@@ -1,23 +1,27 @@
 # 🤖 BOTTRADE V5.1 - Painel Oficial de Paper Trading (Swing 12h + CVD)
-**Ultima Atualizacao**: `2026-10-29 14:47:17 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+**Ultima Atualizacao**: `2026-10-29 15:03:14 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
 ## 💰 Resumo da Carteira
-- **Patrimonio Liquido Total**: **$992.96 USDT** (`-0.70%`)
-- **Caixa Disponivel**: **$992.96 USDT**
-- **Capital em Posicoes**: **$0.00 USDT**
+- **Patrimonio Liquido Total**: **$992.10 USDT** (`-0.79%`)
+- **Caixa Disponivel**: **$298.12 USDT**
+- **Capital em Posicoes**: **$693.99 USDT**
 - **Trades Realizados**: **9** | **Taxa de Acerto (Win Rate)**: **44.4%** | **PnL Realizado**: **$-7.04 USDT**
 
 ## 📊 Sinais e Previsoes em Tempo Real (Horizonte 12h + Order Flow CVD)
 
 | Ativo | Preco Atual | Sinal | Alpha Efetivo (12h) | ML 12h | Impulso CVD | Gate Custo | Status / Diagnostico |
 |:---|---:|:---:|---:|---:|---:|---:|:---|
-| **BTCUSDT** | $81,197.66 | ⚪ **CASH** | **+9.5 bps** | -19.0 bps | +46.2 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
-| **ETHUSDT** | $2,344.15 | ⚪ **CASH** | **-5.9 bps** | -22.7 bps | +16.9 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
-| **SOLUSDT** | $101.83 | ⚪ **CASH** | **+4.5 bps** | -17.5 bps | +34.5 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
+| **BTCUSDT** | $81,263.95 | 🟢 **BUY** | **+29.9 bps** | +23.8 bps | +40.4 bps | 24.0 bps | Entrada Swing 12h aprovada (Alpha +29.9 bps > 24.0 bps | CVD 24h +0.156) |
+| **ETHUSDT** | $2,346.68 | 🟢 **BUY** | **+26.6 bps** | +31.9 bps | +22.1 bps | 24.0 bps | Entrada Swing 12h aprovada (Alpha +26.6 bps > 24.0 bps | CVD 24h +0.026) |
+| **SOLUSDT** | $101.81 | 🟢 **BUY** | **+36.0 bps** | +37.6 bps | +36.4 bps | 24.0 bps | Entrada Swing 12h aprovada (Alpha +36.0 bps > 24.0 bps | CVD 24h +0.122) |
 
 ## 📈 Posicoes Abertas
 
-> *Nenhuma posicao aberta no momento. Aguardando alinhamento de Alpha 12h > 24.0 bps com fluxo comprador CVD.*
+| Ativo | Quantidade | Preco Entrada | Preco Atual | Pico Atingido | PnL Aberto (%) |
+|:---|---:|---:|---:|---:|---:|
+| **BTCUSDT** | 0.0040 | $81,263.95 | $81,263.95 | $81,263.95 | `+0.00%` |
+| **ETHUSDT** | 0.0935 | $2,346.68 | $2,346.68 | $2,346.68 | `+0.00%` |
+| **SOLUSDT** | 1.4431 | $101.81 | $101.81 | $101.81 | `+0.00%` |
 
 ## 🏆 Historico Recente de Operacoes Fechadas
 
