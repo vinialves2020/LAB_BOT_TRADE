@@ -1,30 +1,29 @@
 # 🤖 BOTTRADE V5.1 - Painel Oficial de Paper Trading (Swing 12h + CVD)
-**Ultima Atualizacao**: `2026-10-29 01:47:43 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+**Ultima Atualizacao**: `2026-10-29 02:02:33 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
 ## 💰 Resumo da Carteira
-- **Patrimonio Liquido Total**: **$994.27 USDT** (`-0.57%`)
-- **Caixa Disponivel**: **$776.33 USDT**
-- **Capital em Posicoes**: **$217.94 USDT**
-- **Trades Realizados**: **8** | **Taxa de Acerto (Win Rate)**: **50.0%** | **PnL Realizado**: **$-2.44 USDT**
+- **Patrimonio Liquido Total**: **$992.96 USDT** (`-0.70%`)
+- **Caixa Disponivel**: **$992.96 USDT**
+- **Capital em Posicoes**: **$0.00 USDT**
+- **Trades Realizados**: **9** | **Taxa de Acerto (Win Rate)**: **44.4%** | **PnL Realizado**: **$-7.04 USDT**
 
 ## 📊 Sinais e Previsoes em Tempo Real (Horizonte 12h + Order Flow CVD)
 
 | Ativo | Preco Atual | Sinal | Alpha Efetivo (12h) | ML 12h | Impulso CVD | Gate Custo | Status / Diagnostico |
 |:---|---:|:---:|---:|---:|---:|---:|:---|
-| **BTCUSDT** | $80,475.90 | ⚪ **CASH** | **+22.0 bps** | +2.8 bps | +47.8 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
-| **ETHUSDT** | $2,328.22 | 🟡 **HOLD** | **+14.9 bps** | +3.7 bps | +29.8 bps | 24.0 bps | Posição ativa há 4.8h (PnL: -1.37% | Pico: +0.28%) |
-| **SOLUSDT** | $100.60 | ⚪ **CASH** | **+9.7 bps** | -9.1 bps | +34.9 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
+| **BTCUSDT** | $80,166.06 | ⚪ **CASH** | **-3.9 bps** | -26.7 bps | +25.5 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
+| **ETHUSDT** | $2,317.01 | 🔴 **SELL** | **+10.6 bps** | +14.7 bps | +8.6 bps | 24.0 bps | Stop Loss técnico acionado (-1.84%) |
+| **SOLUSDT** | $100.07 | ⚪ **CASH** | **+15.0 bps** | +13.5 bps | +19.3 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
 
 ## 📈 Posicoes Abertas
 
-| Ativo | Quantidade | Preco Entrada | Preco Atual | Pico Atingido | PnL Aberto (%) |
-|:---|---:|---:|---:|---:|---:|
-| **ETHUSDT** | 0.0936 | $2,360.55 | $2,328.22 | $2,367.21 | `-1.37%` |
+> *Nenhuma posicao aberta no momento. Aguardando alinhamento de Alpha 12h > 24.0 bps com fluxo comprador CVD.*
 
 ## 🏆 Historico Recente de Operacoes Fechadas
 
 | Ativo | Abertura | Fechamento | Entrada | Saida | PnL Liquido (%) | PnL (USDT) | Motivo da Saida |
 |:---|:---|:---|---:|---:|---:|---:|:---|
+| **ETHUSDT** | `2026-10-28T21:02` | `2026-10-29 02:02` | $2,360.55 | $2,317.01 | **`-2.08%`** | `$-4.60` | Stop Loss técnico acionado (-1.84%) |
 | **BTCUSDT** | `2026-10-28T10:02` | `2026-10-28 22:04` | $81,559.88 | $81,236.06 | **`-0.64%`** | `$-2.10` | Alvo temporal de 12h concluído (-0.40%) |
 | **SOLUSDT** | `2026-10-28T19:02` | `2026-10-28 20:17` | $102.12 | $102.67 | **`+0.30%`** | `$+0.66` | Trailing Stop acionado (pico +1.59%, realizou +0.54%) |
 | **BTCUSDT** | `2026-10-27T16:02` | `2026-10-28 04:17` | $80,544.86 | $81,002.41 | **`+0.33%`** | `$+0.72` | Alvo temporal de 12h concluído (+0.57%) |

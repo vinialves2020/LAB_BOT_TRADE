@@ -1,29 +1,29 @@
 {
   "ledger": "paper_1000",
   "initial_cash": 1000.0,
-  "cash": 776.3255,
-  "realized_pnl_usdt": -2.4392,
-  "closed_trades_count": 8,
+  "cash": 992.9559,
+  "realized_pnl_usdt": -7.044,
+  "closed_trades_count": 9,
   "winning_trades_count": 4,
-  "positions": {
-    "ETHUSDT": {
-      "asset": "ETHUSDT",
-      "quantity": 0.093608,
-      "entry_price": 2360.55,
-      "peak_price": 2367.21,
-      "notional_usdt": 220.97,
-      "entry_fee_usdt": 0.2652,
-      "opened_at": "2026-10-28T21:02:37.733413+00:00",
-      "entry_effective_bps": 27.26,
-      "entry_reason": "Entrada Swing 12h aprovada (Alpha +27.3 bps > 24.0 bps | CVD 24h +0.045)"
-    }
-  },
+  "positions": {},
   "last_exit_times": {
-    "ETHUSDT": "2026-10-28T02:02:36.192992+00:00",
+    "ETHUSDT": "2026-10-29T02:02:30.998993+00:00",
     "SOLUSDT": "2026-10-28T20:17:25.272233+00:00",
     "BTCUSDT": "2026-10-28T22:04:04.278440+00:00"
   },
   "trade_history": [
+    {
+      "asset": "ETHUSDT",
+      "opened_at": "2026-10-28T21:02:37.733413+00:00",
+      "closed_at": "2026-10-29 02:02:30 UTC",
+      "entry_price": 2360.55,
+      "exit_price": 2317.01,
+      "quantity": 0.093608,
+      "gross_pnl_pct": -1.84,
+      "net_pnl_pct": -2.08,
+      "net_pnl_usdt": -4.6,
+      "exit_reason": "Stop Loss técnico acionado (-1.84%)"
+    },
     {
       "asset": "BTCUSDT",
       "opened_at": "2026-10-28T10:02:09.011990+00:00",
