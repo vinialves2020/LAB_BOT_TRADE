@@ -1,31 +1,31 @@
 # 🤖 BOTTRADE V5.1 - Painel Oficial de Paper Trading (Swing 12h + CVD)
-**Ultima Atualizacao**: `2026-10-29 19:02:44 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+**Ultima Atualizacao**: `2026-10-29 19:17:16 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
 ## 💰 Resumo da Carteira
-- **Patrimonio Liquido Total**: **$989.18 USDT** (`-1.08%`)
-- **Caixa Disponivel**: **$518.31 USDT**
-- **Capital em Posicoes**: **$470.86 USDT**
-- **Trades Realizados**: **10** | **Taxa de Acerto (Win Rate)**: **50.0%** | **PnL Realizado**: **$-6.52 USDT**
+- **Patrimonio Liquido Total**: **$988.47 USDT** (`-1.15%`)
+- **Caixa Disponivel**: **$662.78 USDT**
+- **Capital em Posicoes**: **$325.70 USDT**
+- **Trades Realizados**: **11** | **Taxa de Acerto (Win Rate)**: **45.5%** | **PnL Realizado**: **$-9.15 USDT**
 
 ## 📊 Sinais e Previsoes em Tempo Real (Horizonte 12h + Order Flow CVD)
 
 | Ativo | Preco Atual | Sinal | Alpha Efetivo (12h) | ML 12h | Impulso CVD | Gate Custo | Status / Diagnostico |
 |:---|---:|:---:|---:|---:|---:|---:|:---|
-| **BTCUSDT** | $80,830.01 | 🟡 **HOLD** | **+29.4 bps** | +33.8 bps | +25.9 bps | 24.0 bps | Posição ativa há 4.0h (PnL: -0.53% | Pico: +0.74%) |
-| **ETHUSDT** | $2,328.66 | ⚪ **CASH** | **+33.0 bps** | +36.2 bps | +30.1 bps | 24.0 bps | Filtro: aguardando cooldown pós-trade (3h) |
-| **SOLUSDT** | $100.45 | 🟡 **HOLD** | **+26.1 bps** | +25.3 bps | +30.8 bps | 24.0 bps | Posição ativa há 4.0h (PnL: -1.34% | Pico: +0.82%) |
+| **BTCUSDT** | $80,778.00 | 🟡 **HOLD** | **+29.4 bps** | +33.8 bps | +25.9 bps | 24.0 bps | Posição ativa há 4.2h (PnL: -0.60% | Pico: +0.74%) |
+| **ETHUSDT** | $2,327.12 | ⚪ **CASH** | **+33.0 bps** | +36.2 bps | +30.1 bps | 24.0 bps | Filtro: aguardando cooldown pós-trade (3h) |
+| **SOLUSDT** | $100.23 | 🔴 **SELL** | **+26.1 bps** | +25.3 bps | +30.8 bps | 24.0 bps | Stop Loss técnico acionado (-1.55%) |
 
 ## 📈 Posicoes Abertas
 
 | Ativo | Quantidade | Preco Entrada | Preco Atual | Pico Atingido | PnL Aberto (%) |
 |:---|---:|---:|---:|---:|---:|
-| **BTCUSDT** | 0.0040 | $81,263.95 | $80,830.01 | $81,865.38 | `-0.53%` |
-| **SOLUSDT** | 1.4431 | $101.81 | $100.45 | $102.64 | `-1.34%` |
+| **BTCUSDT** | 0.0040 | $81,263.95 | $80,778.00 | $81,865.38 | `-0.60%` |
 
 ## 🏆 Historico Recente de Operacoes Fechadas
 
 | Ativo | Abertura | Fechamento | Entrada | Saida | PnL Liquido (%) | PnL (USDT) | Motivo da Saida |
 |:---|:---|:---|---:|---:|---:|---:|:---|
+| **SOLUSDT** | `2026-10-29T15:03` | `2026-10-29 19:17` | $101.81 | $100.23 | **`-1.79%`** | `$-2.63` | Stop Loss técnico acionado (-1.55%) |
 | **ETHUSDT** | `2026-10-29T15:03` | `2026-10-29 16:32` | $2,346.68 | $2,357.90 | **`+0.24%`** | `$+0.52` | Trailing Stop acionado (pico +1.03%, realizou +0.48%) |
 | **ETHUSDT** | `2026-10-28T21:02` | `2026-10-29 02:02` | $2,360.55 | $2,317.01 | **`-2.08%`** | `$-4.60` | Stop Loss técnico acionado (-1.84%) |
 | **BTCUSDT** | `2026-10-28T10:02` | `2026-10-28 22:04` | $81,559.88 | $81,236.06 | **`-0.64%`** | `$-2.10` | Alvo temporal de 12h concluído (-0.40%) |
@@ -35,4 +35,3 @@
 | **ETHUSDT** | `2026-10-26T20:02` | `2026-10-27 08:02` | $2,316.07 | $2,316.86 | **`-0.21%`** | `$-0.68` | Alvo temporal de 12h concluído (+0.03%) |
 | **ETHUSDT** | `2026-10-21T19:02` | `2026-10-22 02:02` | $2,489.99 | $2,453.89 | **`-1.69%`** | `$-5.57` | Stop Loss técnico acionado (-1.45%) |
 | **SOLUSDT** | `2026-10-20T22:02` | `2026-10-21 02:02` | $106.81 | $106.60 | **`-0.44%`** | `$-0.97` | Reversão de fluxo/modelo (-10.9 bps) |
-| **ETHUSDT** | `2026-10-20T18:53` | `2026-10-20 23:17` | $2,436.45 | $2,448.60 | **`+0.26%`** | `$+0.85` | Trailing Stop acionado (pico +1.10%, realizou +0.50%) |

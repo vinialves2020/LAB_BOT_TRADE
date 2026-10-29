@@ -1,9 +1,9 @@
 {
   "ledger": "paper_1000",
   "initial_cash": 1000.0,
-  "cash": 518.3119,
-  "realized_pnl_usdt": -6.5206,
-  "closed_trades_count": 10,
+  "cash": 662.7779,
+  "realized_pnl_usdt": -9.1509,
+  "closed_trades_count": 11,
   "winning_trades_count": 5,
   "positions": {
     "BTCUSDT": {
@@ -16,25 +16,26 @@
       "opened_at": "2026-10-29T15:03:11.780428+00:00",
       "entry_effective_bps": 29.86,
       "entry_reason": "Entrada Swing 12h aprovada (Alpha +29.9 bps > 24.0 bps | CVD 24h +0.156)"
-    },
-    "SOLUSDT": {
-      "asset": "SOLUSDT",
-      "quantity": 1.443077,
-      "entry_price": 101.81,
-      "peak_price": 102.64,
-      "notional_usdt": 146.92,
-      "entry_fee_usdt": 0.1763,
-      "opened_at": "2026-10-29T15:03:11.780428+00:00",
-      "entry_effective_bps": 35.99,
-      "entry_reason": "Entrada Swing 12h aprovada (Alpha +36.0 bps > 24.0 bps | CVD 24h +0.122)"
     }
   },
   "last_exit_times": {
     "ETHUSDT": "2026-10-29T16:32:27.434517+00:00",
-    "SOLUSDT": "2026-10-28T20:17:25.272233+00:00",
+    "SOLUSDT": "2026-10-29T19:17:15.908527+00:00",
     "BTCUSDT": "2026-10-28T22:04:04.278440+00:00"
   },
   "trade_history": [
+    {
+      "asset": "SOLUSDT",
+      "opened_at": "2026-10-29T15:03:11.780428+00:00",
+      "closed_at": "2026-10-29 19:17:15 UTC",
+      "entry_price": 101.81,
+      "exit_price": 100.23,
+      "quantity": 1.443077,
+      "gross_pnl_pct": -1.55,
+      "net_pnl_pct": -1.79,
+      "net_pnl_usdt": -2.63,
+      "exit_reason": "Stop Loss técnico acionado (-1.55%)"
+    },
     {
       "asset": "ETHUSDT",
       "opened_at": "2026-10-29T15:03:11.780428+00:00",
