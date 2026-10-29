@@ -1,40 +1,41 @@
 {
   "ledger": "paper_1000",
   "initial_cash": 1000.0,
-  "cash": 443.7987,
-  "realized_pnl_usdt": -9.1509,
-  "closed_trades_count": 11,
+  "cash": 970.4539,
+  "realized_pnl_usdt": -29.5514,
+  "closed_trades_count": 13,
   "winning_trades_count": 5,
-  "positions": {
-    "BTCUSDT": {
-      "asset": "BTCUSDT",
-      "quantity": 0.004032,
-      "entry_price": 81263.95,
-      "peak_price": 81865.38,
-      "notional_usdt": 327.68,
-      "entry_fee_usdt": 0.3932,
-      "opened_at": "2026-10-29T15:03:11.780428+00:00",
-      "entry_effective_bps": 29.86,
-      "entry_reason": "Entrada Swing 12h aprovada (Alpha +29.9 bps > 24.0 bps | CVD 24h +0.156)"
-    },
-    "ETHUSDT": {
-      "asset": "ETHUSDT",
-      "quantity": 0.093647,
-      "entry_price": 2335.54,
-      "peak_price": 2335.54,
-      "notional_usdt": 218.72,
-      "entry_fee_usdt": 0.2625,
-      "opened_at": "2026-10-29T19:47:33.698763+00:00",
-      "entry_effective_bps": 32.96,
-      "entry_reason": "Entrada Swing 12h aprovada (Alpha +33.0 bps > 24.0 bps | CVD 24h +0.065)"
-    }
-  },
+  "positions": {},
   "last_exit_times": {
-    "ETHUSDT": "2026-10-29T16:32:27.434517+00:00",
+    "ETHUSDT": "2026-10-29T20:47:12.354361+00:00",
     "SOLUSDT": "2026-10-29T19:17:15.908527+00:00",
-    "BTCUSDT": "2026-10-28T22:04:04.278440+00:00"
+    "BTCUSDT": "2026-10-29T20:47:12.354361+00:00"
   },
   "trade_history": [
+    {
+      "asset": "ETHUSDT",
+      "opened_at": "2026-10-29T19:47:33.698763+00:00",
+      "closed_at": "2026-10-29 20:47:12 UTC",
+      "entry_price": 2335.54,
+      "exit_price": 2245.8,
+      "quantity": 0.093647,
+      "gross_pnl_pct": -3.84,
+      "net_pnl_pct": -4.08,
+      "net_pnl_usdt": -8.92,
+      "exit_reason": "Stop Loss técnico acionado (-3.84%)"
+    },
+    {
+      "asset": "BTCUSDT",
+      "opened_at": "2026-10-29T15:03:11.780428+00:00",
+      "closed_at": "2026-10-29 20:47:12 UTC",
+      "entry_price": 81263.95,
+      "exit_price": 78614.96,
+      "quantity": 0.004032,
+      "gross_pnl_pct": -3.26,
+      "net_pnl_pct": -3.5,
+      "net_pnl_usdt": -11.48,
+      "exit_reason": "Stop Loss técnico acionado (-3.26%)"
+    },
     {
       "asset": "SOLUSDT",
       "opened_at": "2026-10-29T15:03:11.780428+00:00",
