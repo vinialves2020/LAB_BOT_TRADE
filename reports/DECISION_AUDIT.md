@@ -3,9 +3,19 @@
 Este documento registra o histórico contínuo das decisões tomadas pelo algoritmo a cada ciclo em tempo real na Binance.
 Ele permite auditar o Alpha Composto de 12h (Ensemble 5x XGBoost + Order Flow CVD) e o disparo de travas de proteção.
 
-**Última Atualização**: `2026-10-30 02:47:49 UTC` | **Ledger**: `paper_1000`
+**Última Atualização**: `2026-10-30 03:02:49 UTC` | **Ledger**: `paper_1000`
 
 <!-- AUDIT_START -->
+### 🕒 Ciclo `2026-10-30 03:02:49 UTC` | Patrimônio: **$970.45 USDT** (Caixa: `$970.45`)
+
+| Ativo | Preço | Sinal | Alpha 12h Efetivo | ML 12h | Order Flow (CVD 24h/6h) | Volatilidade | Filtros de Risco | Racional Quantitativo |
+|:---|---:|:---:|---:|---:|:---:|:---:|:---|:---|
+| **BTCUSDT** | $77,534.83 | ⚪ **CASH** | **-24.8 bps** (±14.3) | `-30.8 bps` | `-0.038 / -0.094` | `0.63%/h` | `btc_dumping` `weak_order_flow` `stretched_top` | Aguardando setup com assimetria (> 24.0 bps) |
+| **ETHUSDT** | $2,216.17 | ⚪ **CASH** | **-6.5 bps** (±11.4) | `+3.0 bps` | `-0.041 / -0.105` | `0.79%/h` | `btc_dumping` `weak_order_flow` `stretched_top` | Aguardando setup com assimetria (> 24.0 bps) |
+| **SOLUSDT** | $95.83 | ⚪ **CASH** | **-47.1 bps** (±12.8) | `-68.3 bps` | `-0.054 / -0.119` | `0.93%/h` | `btc_dumping` `weak_order_flow` `stretched_top` | Aguardando setup com assimetria (> 24.0 bps) |
+
+---
+
 ### 🕒 Ciclo `2026-10-30 02:47:49 UTC` | Patrimônio: **$970.45 USDT** (Caixa: `$970.45`)
 
 | Ativo | Preço | Sinal | Alpha 12h Efetivo | ML 12h | Order Flow (CVD 24h/6h) | Volatilidade | Filtros de Risco | Racional Quantitativo |
@@ -353,13 +363,3 @@ Ele permite auditar o Alpha Composto de 12h (Ensemble 5x XGBoost + Order Flow CV
 | **BTCUSDT** | $80,842.01 | 🟡 **HOLD** | **+21.2 bps** (±12.5) | `+17.7 bps` | `+0.118 / +0.089` | `0.41%/h` | Liberado ✅ | Posição ativa há 3.2h (PnL: -0.52% | Pico: +0.74%) |
 | **ETHUSDT** | $2,340.43 | ⚪ **CASH** | **+33.2 bps** (±10.6) | `+41.1 bps` | `+0.053 / +0.154` | `0.47%/h` | `cooldown_active` | Filtro: aguardando cooldown pós-trade (3h) |
 | **SOLUSDT** | $101.09 | 🟡 **HOLD** | **+31.7 bps** (±7.7) | `+29.6 bps` | `+0.114 / +0.190` | `0.55%/h` | Liberado ✅ | Posição ativa há 3.2h (PnL: -0.71% | Pico: +0.82%) |
-
----
-
-### 🕒 Ciclo `2026-10-29 18:02:30 UTC` | Patrimônio: **$989.94 USDT** (Caixa: `$518.31`)
-
-| Ativo | Preço | Sinal | Alpha 12h Efetivo | ML 12h | Order Flow (CVD 24h/6h) | Volatilidade | Filtros de Risco | Racional Quantitativo |
-|:---|---:|:---:|---:|---:|:---:|:---:|:---|:---|
-| **BTCUSDT** | $80,813.10 | 🟡 **HOLD** | **+21.2 bps** (±12.5) | `+17.7 bps` | `+0.118 / +0.089` | `0.41%/h` | Liberado ✅ | Posição ativa há 3.0h (PnL: -0.55% | Pico: +0.74%) |
-| **ETHUSDT** | $2,338.32 | ⚪ **CASH** | **+33.2 bps** (±10.6) | `+41.1 bps` | `+0.053 / +0.154` | `0.47%/h` | `cooldown_active` | Filtro: aguardando cooldown pós-trade (3h) |
-| **SOLUSDT** | $101.03 | 🟡 **HOLD** | **+31.7 bps** (±7.7) | `+29.6 bps` | `+0.114 / +0.190` | `0.55%/h` | Liberado ✅ | Posição ativa há 3.0h (PnL: -0.77% | Pico: +0.82%) |
