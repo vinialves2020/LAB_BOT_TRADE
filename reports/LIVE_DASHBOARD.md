@@ -1,26 +1,26 @@
 # 🤖 BOTTRADE V5.1 - Painel Oficial de Paper Trading (Swing 12h + CVD)
-**Ultima Atualizacao**: `2026-11-02 10:47:41 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+**Ultima Atualizacao**: `2026-11-02 11:02:29 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
 ## 💰 Resumo da Carteira
-- **Patrimonio Liquido Total**: **$963.21 USDT** (`-3.68%`)
+- **Patrimonio Liquido Total**: **$963.22 USDT** (`-3.68%`)
 - **Caixa Disponivel**: **$606.74 USDT**
-- **Capital em Posicoes**: **$356.47 USDT**
+- **Capital em Posicoes**: **$356.48 USDT**
 - **Trades Realizados**: **14** | **Taxa de Acerto (Win Rate)**: **35.7%** | **PnL Realizado**: **$-34.80 USDT**
 
 ## 📊 Sinais e Previsoes em Tempo Real (Horizonte 12h + Order Flow CVD)
 
 | Ativo | Preco Atual | Sinal | Alpha Efetivo (12h) | ML 12h | Impulso CVD | Gate Custo | Status / Diagnostico |
 |:---|---:|:---:|---:|---:|---:|---:|:---|
-| **BTCUSDT** | $78,025.78 | 🟡 **HOLD** | **+29.8 bps** | +45.3 bps | +12.6 bps | 24.0 bps | Posição ativa há 5.8h (PnL: -0.52% | Pico: +0.00%) |
-| **ETHUSDT** | $2,286.30 | 🟡 **HOLD** | **-0.3 bps** | +19.6 bps | -22.6 bps | 24.0 bps | Posição ativa há 5.8h (PnL: -0.31% | Pico: +0.31%) |
-| **SOLUSDT** | $94.14 | ⚪ **CASH** | **+24.6 bps** | +33.2 bps | +16.2 bps | 24.0 bps | Filtro: compressão de volatilidade (< 0.70) |
+| **BTCUSDT** | $77,996.00 | 🟡 **HOLD** | **+28.5 bps** | +45.6 bps | +9.5 bps | 24.0 bps | Posição ativa há 6.0h (PnL: -0.56% | Pico: +0.00%) |
+| **ETHUSDT** | $2,287.77 | 🟡 **HOLD** | **+24.8 bps** | +77.4 bps | -37.2 bps | 24.0 bps | Posição ativa há 6.0h (PnL: -0.25% | Pico: +0.31%) |
+| **SOLUSDT** | $94.23 | ⚪ **CASH** | **+23.7 bps** | +30.4 bps | +17.4 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
 
 ## 📈 Posicoes Abertas
 
 | Ativo | Quantidade | Preco Entrada | Preco Atual | Pico Atingido | PnL Aberto (%) |
 |:---|---:|---:|---:|---:|---:|
-| **BTCUSDT** | 0.0027 | $78,432.75 | $78,025.78 | $78,432.75 | `-0.52%` |
-| **ETHUSDT** | 0.0626 | $2,293.39 | $2,286.30 | $2,300.45 | `-0.31%` |
+| **BTCUSDT** | 0.0027 | $78,432.75 | $77,996.00 | $78,432.75 | `-0.56%` |
+| **ETHUSDT** | 0.0626 | $2,293.39 | $2,287.77 | $2,300.45 | `-0.25%` |
 
 ## 🏆 Historico Recente de Operacoes Fechadas
 
