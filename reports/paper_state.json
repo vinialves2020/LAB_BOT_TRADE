@@ -1,40 +1,41 @@
 {
   "ledger": "paper_1000",
   "initial_cash": 1000.0,
-  "cash": 606.7428,
-  "realized_pnl_usdt": -34.8023,
-  "closed_trades_count": 14,
+  "cash": 960.3578,
+  "realized_pnl_usdt": -39.6469,
+  "closed_trades_count": 16,
   "winning_trades_count": 5,
-  "positions": {
-    "BTCUSDT": {
-      "asset": "BTCUSDT",
-      "quantity": 0.002734,
-      "entry_price": 78432.75,
-      "peak_price": 78432.75,
-      "notional_usdt": 214.44,
-      "entry_fee_usdt": 0.2573,
-      "opened_at": "2026-11-02T05:02:32.672275+00:00",
-      "entry_effective_bps": 29.87,
-      "entry_reason": "Entrada Swing 12h aprovada (Alpha +29.9 bps > 24.0 bps | CVD 24h +0.075)"
-    },
-    "ETHUSDT": {
-      "asset": "ETHUSDT",
-      "quantity": 0.06261,
-      "entry_price": 2293.39,
-      "peak_price": 2300.45,
-      "notional_usdt": 143.59,
-      "entry_fee_usdt": 0.1723,
-      "opened_at": "2026-11-02T05:02:32.672275+00:00",
-      "entry_effective_bps": 28.27,
-      "entry_reason": "Entrada Swing 12h aprovada (Alpha +28.3 bps > 24.0 bps | CVD 24h +0.107)"
-    }
-  },
+  "positions": {},
   "last_exit_times": {
-    "ETHUSDT": "2026-10-29T20:47:12.354361+00:00",
+    "ETHUSDT": "2026-11-02T17:03:05.685870+00:00",
     "SOLUSDT": "2026-11-02T07:47:20.484702+00:00",
-    "BTCUSDT": "2026-10-29T20:47:12.354361+00:00"
+    "BTCUSDT": "2026-11-02T17:03:05.685870+00:00"
   },
   "trade_history": [
+    {
+      "asset": "ETHUSDT",
+      "opened_at": "2026-11-02T05:02:32.672275+00:00",
+      "closed_at": "2026-11-02 17:03:05 UTC",
+      "entry_price": 2293.39,
+      "exit_price": 2270.16,
+      "quantity": 0.06261,
+      "gross_pnl_pct": -1.01,
+      "net_pnl_pct": -1.25,
+      "net_pnl_usdt": -1.8,
+      "exit_reason": "Alvo temporal de 12h concluído (-1.01%)"
+    },
+    {
+      "asset": "BTCUSDT",
+      "opened_at": "2026-11-02T05:02:32.672275+00:00",
+      "closed_at": "2026-11-02 17:03:05 UTC",
+      "entry_price": 78432.75,
+      "exit_price": 77507.36,
+      "quantity": 0.002734,
+      "gross_pnl_pct": -1.18,
+      "net_pnl_pct": -1.42,
+      "net_pnl_usdt": -3.05,
+      "exit_reason": "Alvo temporal de 12h concluído (-1.18%)"
+    },
     {
       "asset": "SOLUSDT",
       "opened_at": "2026-11-02T04:02:34.025925+00:00",
