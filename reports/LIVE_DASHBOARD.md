@@ -1,23 +1,25 @@
 # 🤖 BOTTRADE V5.1 - Painel Oficial de Paper Trading (Swing 12h + CVD)
-**Ultima Atualizacao**: `2026-11-02 03:47:23 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+**Ultima Atualizacao**: `2026-11-02 04:02:36 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
 ## 💰 Resumo da Carteira
-- **Patrimonio Liquido Total**: **$970.45 USDT** (`-2.95%`)
-- **Caixa Disponivel**: **$970.45 USDT**
-- **Capital em Posicoes**: **$0.00 USDT**
+- **Patrimonio Liquido Total**: **$970.07 USDT** (`-2.99%`)
+- **Caixa Disponivel**: **$649.82 USDT**
+- **Capital em Posicoes**: **$320.25 USDT**
 - **Trades Realizados**: **13** | **Taxa de Acerto (Win Rate)**: **38.5%** | **PnL Realizado**: **$-29.55 USDT**
 
 ## 📊 Sinais e Previsoes em Tempo Real (Horizonte 12h + Order Flow CVD)
 
 | Ativo | Preco Atual | Sinal | Alpha Efetivo (12h) | ML 12h | Impulso CVD | Gate Custo | Status / Diagnostico |
 |:---|---:|:---:|---:|---:|---:|---:|:---|
-| **BTCUSDT** | $78,824.00 | ⚪ **CASH** | **+19.8 bps** | +20.6 bps | +20.6 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
-| **ETHUSDT** | $2,313.84 | ⚪ **CASH** | **+33.2 bps** | +29.1 bps | +39.7 bps | 24.0 bps | Filtro: preço esticado próximo ao topo de 24h |
-| **SOLUSDT** | $95.87 | ⚪ **CASH** | **+21.1 bps** | +35.4 bps | +6.6 bps | 24.0 bps | Aguardando setup com assimetria (> 24.0 bps) |
+| **BTCUSDT** | $78,636.00 | ⚪ **CASH** | **+36.3 bps** | +42.7 bps | +30.6 bps | 24.0 bps | Filtro: preço esticado próximo ao topo de 24h |
+| **ETHUSDT** | $2,310.04 | ⚪ **CASH** | **+25.5 bps** | +17.2 bps | +38.2 bps | 24.0 bps | Filtro: preço esticado próximo ao topo de 24h |
+| **SOLUSDT** | $95.63 | 🟢 **BUY** | **+24.6 bps** | +31.7 bps | +18.0 bps | 24.0 bps | Entrada Swing 12h aprovada (Alpha +24.6 bps > 24.0 bps | CVD 24h +0.025) |
 
 ## 📈 Posicoes Abertas
 
-> *Nenhuma posicao aberta no momento. Aguardando alinhamento de Alpha 12h > 24.0 bps com fluxo comprador CVD.*
+| Ativo | Quantidade | Preco Entrada | Preco Atual | Pico Atingido | PnL Aberto (%) |
+|:---|---:|---:|---:|---:|---:|
+| **SOLUSDT** | 3.3488 | $95.63 | $95.63 | $95.63 | `+0.00%` |
 
 ## 🏆 Historico Recente de Operacoes Fechadas
 
