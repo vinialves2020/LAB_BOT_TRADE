@@ -1,25 +1,25 @@
 # 🤖 BOTTRADE V5.1 - Painel Oficial de Paper Trading (Swing 12h + CVD)
-**Ultima Atualizacao**: `2026-11-02 04:32:36 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+**Ultima Atualizacao**: `2026-11-02 04:47:36 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
 ## 💰 Resumo da Carteira
-- **Patrimonio Liquido Total**: **$969.57 USDT** (`-3.04%`)
+- **Patrimonio Liquido Total**: **$968.83 USDT** (`-3.12%`)
 - **Caixa Disponivel**: **$649.82 USDT**
-- **Capital em Posicoes**: **$319.75 USDT**
+- **Capital em Posicoes**: **$319.01 USDT**
 - **Trades Realizados**: **13** | **Taxa de Acerto (Win Rate)**: **38.5%** | **PnL Realizado**: **$-29.55 USDT**
 
 ## 📊 Sinais e Previsoes em Tempo Real (Horizonte 12h + Order Flow CVD)
 
 | Ativo | Preco Atual | Sinal | Alpha Efetivo (12h) | ML 12h | Impulso CVD | Gate Custo | Status / Diagnostico |
 |:---|---:|:---:|---:|---:|---:|---:|:---|
-| **BTCUSDT** | $78,592.43 | ⚪ **CASH** | **+36.3 bps** | +42.7 bps | +30.6 bps | 24.0 bps | Filtro: preço esticado próximo ao topo de 24h |
-| **ETHUSDT** | $2,307.54 | ⚪ **CASH** | **+25.5 bps** | +17.2 bps | +38.2 bps | 24.0 bps | Filtro: preço esticado próximo ao topo de 24h |
-| **SOLUSDT** | $95.48 | 🟡 **HOLD** | **+24.6 bps** | +31.7 bps | +18.0 bps | 24.0 bps | Posição ativa há 0.5h (PnL: -0.16% | Pico: +0.02%) |
+| **BTCUSDT** | $78,504.01 | ⚪ **CASH** | **+36.3 bps** | +42.7 bps | +30.6 bps | 24.0 bps | Filtro: preço esticado próximo ao topo de 24h |
+| **ETHUSDT** | $2,303.53 | ⚪ **CASH** | **+25.5 bps** | +17.2 bps | +38.2 bps | 24.0 bps | Filtro: preço esticado próximo ao topo de 24h |
+| **SOLUSDT** | $95.26 | 🟡 **HOLD** | **+24.6 bps** | +31.7 bps | +18.0 bps | 24.0 bps | Posição ativa há 0.8h (PnL: -0.39% | Pico: +0.02%) |
 
 ## 📈 Posicoes Abertas
 
 | Ativo | Quantidade | Preco Entrada | Preco Atual | Pico Atingido | PnL Aberto (%) |
 |:---|---:|---:|---:|---:|---:|
-| **SOLUSDT** | 3.3488 | $95.63 | $95.48 | $95.65 | `-0.16%` |
+| **SOLUSDT** | 3.3488 | $95.63 | $95.26 | $95.65 | `-0.39%` |
 
 ## 🏆 Historico Recente de Operacoes Fechadas
 
