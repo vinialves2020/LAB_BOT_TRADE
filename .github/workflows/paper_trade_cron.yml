@@ -27,7 +27,7 @@ jobs:
       - name: Instalar Dependências Leves de Inferência (ONNX Runtime)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --retries 5 --timeout 60 . "onnxruntime>=1.20,<2"
+          python -m pip install --retries 5 --timeout 60 . "joblib>=1.4,<2" "onnxruntime>=1.20,<2"
 
       - name: Executar Ciclo de Paper Trading V5 (Live Binance)
         env:
@@ -41,7 +41,8 @@ jobs:
         with:
           name: bottrade-database
           path: data/bottrade.db
-          retention-days: 30
+          retention-days: 3
+          if-no-files-found: ignore
 
       - name: Atualizar Dashboard e Auditoria no Repositório
         run: |
