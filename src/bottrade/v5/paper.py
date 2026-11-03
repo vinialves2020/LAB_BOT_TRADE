@@ -201,11 +201,19 @@ class PaperTradingV5:
         positions_state: dict[str, dict[str, Any]] = state.setdefault("positions", {})
         last_exits: dict[str, str] = state.setdefault("last_exit_times", {})
         trade_history: list[dict[str, Any]] = state.setdefault("trade_history", [])
+        last_stop_str = str(state.get("last_stop_loss_at", ""))
 
         btc_features = build_features(asset=Asset.BTCUSDT, market=market, intrahour=None, config=v4_compat)
         btc_latest = btc_features.iloc[-1]
         btc_24h_ret = float(btc_latest.get("return_24h", 0.0))
         btc_cvd_24h = float(btc_latest.get("cvd_ratio_24h", 0.0))
+
+        global_stop_cooldown = False
+        if last_stop_str:
+            with contextlib.suppress(Exception):
+                stop_dt = datetime.fromisoformat(last_stop_str)
+                if (now_utc - stop_dt).total_seconds() < 6.0 * 3600.0:
+                    global_stop_cooldown = True
 
         for asset in (Asset.BTCUSDT, Asset.ETHUSDT, Asset.SOLUSDT):
             features = build_features(asset=asset, market=market, intrahour=None, config=v4_compat)
@@ -237,30 +245,44 @@ class PaperTradingV5:
             cvd_6h = float(latest_row.get("cvd_ratio_6h", 0.0))
             cvd_24h = float(latest_row.get("cvd_ratio_24h", 0.0))
 
-            # Alpha Composto Institucional (Previsão Swing 12h + Impulso de Order Flow CVD)
+            # Alpha Composto Institucional V5.2 (Previsão Swing 12h + Impulso de Order Flow CVD)
             flow_bps = (cvd_24h * 120.0) + (cvd_6h * 80.0) + (btc_cvd_24h * 60.0)
             effective_bps = 0.55 * pred_mean_bps + 0.45 * flow_bps - 0.10 * pred_std_bps
-            threshold_bps = float(self.v5_config.round_trip_bps + self.v5_config.entry_margins_bps[0])
+            # Gate de Entrada V5.2: 24.0 bps (taxa) + 12.0 bps (margem líquida mínima de segurança) = 36.0 bps
+            threshold_bps = float(self.v5_config.round_trip_bps + 12.0)
 
-            # Filtros inteligentes de regime, fluxo e anti-topo
+            # Filtros inteligentes V5.2: regime, fluxo institucional, divergência de ensemble, anti-topo e tendência macro
             vol_compressed = vol_ratio < 0.70
-            btc_dumping = btc_24h_ret < -0.020
-            weak_order_flow = not ((cvd_24h > 0.015) and (cvd_6h > 0.015) and (btc_cvd_24h > -0.010))
-            stretched_top = not ((dist_high_24 < -0.003) and (close_to_ema_24 > -0.015))
+            btc_dumping = btc_24h_ret < 0.0005
+            high_uncertainty = pred_std_bps > 20.0
+            weak_order_flow = not (
+                (cvd_24h >= 0.080)
+                and (cvd_6h >= 0.090)
+                and (btc_cvd_24h > -0.010)
+                and (pred_mean_bps >= 30.0)
+                and (flow_bps >= 22.0)
+            )
+            macro_downtrend = close_to_ema_168 < -0.002 and close_to_ema_72 > 0.0
+            stretched_top = not (
+                (dist_high_24 < -0.008)
+                and (-0.015 < close_to_ema_24 <= 0.0090)
+                and (close_to_ema_72 <= 0.0105)
+                and (btc_24h_ret <= 0.0085)
+            )
 
             cooldown_active = False
             last_exit_str = last_exits.get(asset.value)
             if last_exit_str:
                 with contextlib.suppress(Exception):
                     last_dt = datetime.fromisoformat(last_exit_str)
-                    if (now_utc - last_dt).total_seconds() < 3.0 * 3600.0:
+                    if (now_utc - last_dt).total_seconds() < 4.0 * 3600.0:
                         cooldown_active = True
 
             pos_info = positions_state.get(asset.value)
             has_position = pos_info is not None and float(pos_info.get("quantity", 0.0)) > 0.0
 
             signal_label = "CASH"
-            reason = "Aguardando setup com assimetria (> 24.0 bps)"
+            reason = f"Aguardando setup com assimetria (> {threshold_bps:.1f} bps)"
 
             if has_position and pos_info is not None:
                 entry_p = float(pos_info["entry_price"])
@@ -274,42 +296,56 @@ class PaperTradingV5:
                     opened_dt = datetime.fromisoformat(str(pos_info.get("opened_at", now_utc.isoformat())))
                 held_hours = max(0.0, (now_utc - opened_dt).total_seconds() / 3600.0)
 
-                trailing_stop = peak_gross >= max(0.010, 1.8 * vol_1h) and gross <= (peak_gross * 0.55)
-                hard_stop = gross <= -max(0.014, 2.2 * vol_1h)
+                trailing_stop = peak_gross >= max(0.0135, 1.8 * vol_1h) and gross <= (peak_gross * 0.68)
+                breakeven_lock = peak_gross >= 0.0095 and gross <= (peak_gross * 0.48)
+                early_cut = held_hours >= 1.5 and peak_gross < 0.0030 and gross <= -0.0045
+                hard_stop = gross <= -max(0.012, 1.9 * vol_1h)
                 time_exit = held_hours >= float(self.v5_config.max_holding_hours)
-                reversal_exit = effective_bps < -10.0
+                reversal_exit = effective_bps < 0.0 or (held_hours >= 1.0 and btc_24h_ret < -0.005 and gross < -0.002)
 
                 if trailing_stop:
                     signal_label = "SELL"
                     reason = f"Trailing Stop acionado (pico {peak_gross*100:+.2f}%, realizou {gross*100:+.2f}%)"
+                elif breakeven_lock:
+                    signal_label = "SELL"
+                    reason = f"Proteção de Lucro acionada (pico {peak_gross*100:+.2f}%, realizou {gross*100:+.2f}%)"
+                elif early_cut:
+                    signal_label = "SELL"
+                    reason = f"Corte rápido de falha de impulso ({gross*100:+.2f}%)"
                 elif hard_stop:
                     signal_label = "SELL"
                     reason = f"Stop Loss técnico acionado ({gross*100:+.2f}%)"
+                elif reversal_exit:
+                    signal_label = "SELL"
+                    reason = f"Saída por reversão/fraqueza ({effective_bps:+.1f} bps)"
                 elif time_exit:
                     signal_label = "SELL"
                     reason = f"Alvo temporal de {self.v5_config.max_holding_hours}h concluído ({gross*100:+.2f}%)"
-                elif reversal_exit:
-                    signal_label = "SELL"
-                    reason = f"Reversão de fluxo/modelo ({effective_bps:+.1f} bps)"
                 else:
                     signal_label = "HOLD"
                     reason = f"Posição ativa há {held_hours:.1f}h (PnL: {gross*100:+.2f}% | Pico: {peak_gross*100:+.2f}%)"
             else:
-                if effective_bps > threshold_bps:
-                    if cooldown_active:
-                        reason = "Filtro: aguardando cooldown pós-trade (3h)"
+                if effective_bps >= threshold_bps:
+                    if global_stop_cooldown:
+                        reason = "Filtro: disjuntor global pós-Stop ativo (6h)"
+                    elif cooldown_active:
+                        reason = "Filtro: aguardando cooldown pós-trade (4h)"
                     elif vol_compressed:
                         reason = "Filtro: compressão de volatilidade (< 0.70)"
                     elif btc_dumping:
-                        reason = "Filtro: queda macro abrupta no Bitcoin"
+                        reason = "Filtro: Bitcoin sem tração positiva em 24h"
+                    elif high_uncertainty:
+                        reason = f"Filtro: divergência alta no ensemble ({pred_std_bps:.1f} bps > 20)"
                     elif weak_order_flow:
-                        reason = "Filtro: fluxo comprador CVD insuficiente"
+                        reason = "Filtro: absorção institucional CVD 24h/6h insuficiente"
+                    elif macro_downtrend:
+                        reason = "Filtro: armadilha de repique contra EMA semanal (168h)"
                     elif stretched_top:
-                        reason = "Filtro: preço esticado próximo ao topo de 24h"
+                        reason = "Filtro: preço já esticado acima das EMAs 24h/72h"
                     else:
                         signal_label = "BUY"
                         reason = (
-                            f"Entrada Swing 12h aprovada (Alpha {effective_bps:+.1f} bps > "
+                            f"Entrada Swing V5.2 aprovada (Alpha {effective_bps:+.1f} bps >= "
                             f"{threshold_bps:.1f} bps | CVD 24h {cvd_24h:+.3f})"
                         )
 
@@ -335,9 +371,12 @@ class PaperTradingV5:
                     vol_ratio=vol_ratio,
                     btc_24h_ret=btc_24h_ret,
                     filters={
+                        "global_stop_cooldown": bool(global_stop_cooldown),
                         "vol_compressed": bool(vol_compressed),
                         "btc_dumping": bool(btc_dumping),
+                        "high_uncertainty": bool(high_uncertainty),
                         "weak_order_flow": bool(weak_order_flow),
+                        "macro_downtrend": bool(macro_downtrend),
                         "stretched_top": bool(stretched_top),
                         "cooldown_active": bool(cooldown_active),
                     },
@@ -345,58 +384,16 @@ class PaperTradingV5:
             )
 
         # 2. Execução simulada das ordens (Estado JSON + SQLite)
+        # Processar vendas primeiro para liberar caixa e acionar disjuntor se houve Stop
         order_fills: list[tuple[PaperOrder, PaperFill]] = []
+        price_lookup = {s.asset: s.current_price for s in signals}
 
         for sig in signals:
             asset_enum = Asset(sig.asset)
             pos_info = positions_state.get(sig.asset)
             has_pos = pos_info is not None and float(pos_info.get("quantity", 0.0)) > 0.0
 
-            if sig.signal == "BUY" and not has_pos and cash >= 100.0:
-                trade_notional = min(cash * 0.33, 330.0)
-                qty = trade_notional / sig.current_price
-                fee = trade_notional * (self.v5_config.round_trip_bps / 20_000.0)
-                order_id = f"v5-{asset_enum.value}-BUY-{now_utc.strftime('%Y%m%d%H%M%S')}"
-                order = PaperOrder(
-                    client_order_id=order_id,
-                    ledger=self.ledger_name,
-                    asset=asset_enum,
-                    as_of=now_utc,
-                    side="BUY",
-                    quantity=Decimal(f"{qty:.6f}"),
-                    reference_price=Decimal(f"{sig.current_price:.4f}"),
-                    reason=sig.reason[:120],
-                )
-                fill = PaperFill(
-                    client_order_id=order_id,
-                    ledger=self.ledger_name,
-                    asset=asset_enum,
-                    as_of=now_utc,
-                    side="BUY",
-                    quantity=Decimal(f"{qty:.6f}"),
-                    price=Decimal(f"{sig.current_price:.4f}"),
-                    fee=Decimal(f"{fee:.6f}"),
-                    bid=Decimal(f"{sig.current_price * 0.9998:.4f}"),
-                    ask=Decimal(f"{sig.current_price * 1.0002:.4f}"),
-                    visible_depth_quantity=Decimal("10.0"),
-                    visible_depth_notional=Decimal("500000.0"),
-                    spread_bps=4.0,
-                    impact_bps=0.0,
-                )
-                order_fills.append((order, fill))
-                cash -= trade_notional + fee
-                positions_state[sig.asset] = {
-                    "asset": sig.asset,
-                    "quantity": round(qty, 6),
-                    "entry_price": round(sig.current_price, 4),
-                    "peak_price": round(sig.current_price, 4),
-                    "notional_usdt": round(trade_notional, 2),
-                    "entry_fee_usdt": round(fee, 4),
-                    "opened_at": now_utc.isoformat(),
-                    "entry_effective_bps": round(sig.effective_bps, 2),
-                    "entry_reason": sig.reason,
-                }
-            elif sig.signal == "SELL" and has_pos and pos_info is not None:
+            if sig.signal == "SELL" and has_pos and pos_info is not None:
                 qty = float(pos_info["quantity"])
                 entry_p = float(pos_info["entry_price"])
                 entry_notional = float(pos_info.get("notional_usdt", qty * entry_p))
@@ -441,6 +438,9 @@ class PaperTradingV5:
                 state["closed_trades_count"] = int(state.get("closed_trades_count", 0)) + 1
                 if net_pnl_usdt > 0:
                     state["winning_trades_count"] = int(state.get("winning_trades_count", 0)) + 1
+                if gross_pct < -0.30 or "Stop Loss" in sig.reason or "Corte rápido" in sig.reason:
+                    state["last_stop_loss_at"] = now_utc.isoformat()
+                    global_stop_cooldown = True
 
                 trade_record = {
                     "asset": sig.asset,
@@ -458,6 +458,90 @@ class PaperTradingV5:
                 state["trade_history"] = trade_history[:50]
                 last_exits[sig.asset] = now_utc.isoformat()
                 positions_state.pop(sig.asset, None)
+
+        # Processar compras ordenadas pelo maior Alpha, respeitando limite de correlação e disjuntor global
+        buy_candidates = sorted(
+            [s for s in signals if s.signal == "BUY"],
+            key=lambda item: item.effective_bps,
+            reverse=True,
+        )
+        for sig in buy_candidates:
+            asset_enum = Asset(sig.asset)
+            pos_info = positions_state.get(sig.asset)
+            has_pos = pos_info is not None and float(pos_info.get("quantity", 0.0)) > 0.0
+            active_pos_list = [p for p in positions_state.values() if float(p.get("quantity", 0.0)) > 0.0]
+
+            if has_pos or cash < 100.0:
+                continue
+            if global_stop_cooldown:
+                sig.signal = "CASH"
+                sig.reason = "Filtro: disjuntor global pós-Stop acionado neste ciclo"
+                continue
+            if len(active_pos_list) >= 2:
+                sig.signal = "CASH"
+                sig.reason = "Filtro: limite máximo de 2 posições simultâneas"
+                continue
+            if len(active_pos_list) == 1:
+                existing_p = active_pos_list[0]
+                ex_asset = str(existing_p["asset"])
+                ex_cur = price_lookup.get(ex_asset, float(existing_p["entry_price"]))
+                ex_gross = ex_cur / float(existing_p["entry_price"]) - 1.0
+                if ex_gross < 0.0020:
+                    sig.signal = "CASH"
+                    sig.reason = f"Filtro: aguardando 1ª posição ({ex_asset}) consolidar lucro (> +0.20%)"
+                    continue
+
+            open_notional = sum(
+                float(p["quantity"]) * price_lookup.get(str(p["asset"]), float(p["entry_price"]))
+                for p in active_pos_list
+            )
+            total_eq = cash + open_notional
+            trade_notional = min(cash * 0.95, total_eq * 0.33, 330.0)
+            if trade_notional < 100.0:
+                continue
+
+            qty = trade_notional / sig.current_price
+            fee = trade_notional * (self.v5_config.round_trip_bps / 20_000.0)
+            order_id = f"v5-{asset_enum.value}-BUY-{now_utc.strftime('%Y%m%d%H%M%S')}"
+            order = PaperOrder(
+                client_order_id=order_id,
+                ledger=self.ledger_name,
+                asset=asset_enum,
+                as_of=now_utc,
+                side="BUY",
+                quantity=Decimal(f"{qty:.6f}"),
+                reference_price=Decimal(f"{sig.current_price:.4f}"),
+                reason=sig.reason[:120],
+            )
+            fill = PaperFill(
+                client_order_id=order_id,
+                ledger=self.ledger_name,
+                asset=asset_enum,
+                as_of=now_utc,
+                side="BUY",
+                quantity=Decimal(f"{qty:.6f}"),
+                price=Decimal(f"{sig.current_price:.4f}"),
+                fee=Decimal(f"{fee:.6f}"),
+                bid=Decimal(f"{sig.current_price * 0.9998:.4f}"),
+                ask=Decimal(f"{sig.current_price * 1.0002:.4f}"),
+                visible_depth_quantity=Decimal("10.0"),
+                visible_depth_notional=Decimal("500000.0"),
+                spread_bps=4.0,
+                impact_bps=0.0,
+            )
+            order_fills.append((order, fill))
+            cash -= trade_notional + fee
+            positions_state[sig.asset] = {
+                "asset": sig.asset,
+                "quantity": round(qty, 6),
+                "entry_price": round(sig.current_price, 4),
+                "peak_price": round(sig.current_price, 4),
+                "notional_usdt": round(trade_notional, 2),
+                "entry_fee_usdt": round(fee, 4),
+                "opened_at": now_utc.isoformat(),
+                "entry_effective_bps": round(sig.effective_bps, 2),
+                "entry_reason": sig.reason,
+            }
 
         state["cash"] = round(cash, 4)
         self._save_portfolio_state(state)
@@ -490,7 +574,7 @@ class PaperTradingV5:
 
         lines = [
             "=" * 68,
-            "  [BOT] BOTTRADE V5.1 - SWING 12H & CVD ENGINE (ONLINE)",
+            "  [BOT] BOTTRADE V5.2 - SWING 12H & CVD ENGINE (ONLINE)",
             f"  Timestamp: {now_str} | Ledger: {self.ledger_name}",
             "=" * 68,
             f"  Patrimonio Liquido Total: ${total_equity:,.2f} USDT ({pnl_pct:+.2f}%)",
@@ -560,7 +644,7 @@ class PaperTradingV5:
         pnl_pct = (total_equity / 1000.0 - 1.0) * 100.0
 
         md_lines = [
-            "# 🤖 BOTTRADE V5.1 - Painel Oficial de Paper Trading (Swing 12h + CVD)",
+            "# 🤖 BOTTRADE V5.2 - Painel Oficial de Paper Trading (Swing 12h + CVD)",
             f"**Ultima Atualizacao**: `{now_str}` | **Ledger**: `{self.ledger_name}` | **Status**: 🟢 **ONLINE**",
             "",
             "## 💰 Resumo da Carteira",
@@ -599,7 +683,7 @@ class PaperTradingV5:
         active_positions = [p for p in positions_state.values() if float(p.get("quantity", 0.0)) > 0]
         if not active_positions:
             md_lines.append(
-                "> *Nenhuma posicao aberta no momento. Aguardando alinhamento de Alpha 12h > 24.0 bps com fluxo comprador CVD.*"
+                "> *Nenhuma posicao aberta no momento. Aguardando alinhamento de Alpha 12h >= 36.0 bps com fluxo institucional CVD.*"
             )
         else:
             md_lines.append("| Ativo | Quantidade | Preco Entrada | Preco Atual | Pico Atingido | PnL Aberto (%) |")
@@ -731,7 +815,7 @@ class PaperTradingV5:
         new_block = "\n".join(new_block_lines)
 
         header = (
-            "# 📋 BOT_TRADE V5.1 — Livro de Auditoria de Decisões e Análise de Mercado (Swing 12h + CVD)\n\n"
+            "# 📋 BOT_TRADE V5.2 — Livro de Auditoria de Decisões e Análise de Mercado (Swing 12h + CVD)\n\n"
             "Este documento registra o histórico contínuo das decisões tomadas pelo algoritmo a cada ciclo em tempo real na Binance.\n"
             "Ele permite auditar o Alpha Composto de 12h (Ensemble 5x XGBoost + Order Flow CVD) e o disparo de travas de proteção.\n\n"
             f"**Última Atualização**: `{now_str}` | **Ledger**: `{self.ledger_name}`\n\n"

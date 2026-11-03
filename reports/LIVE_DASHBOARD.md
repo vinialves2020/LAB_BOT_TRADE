@@ -17,7 +17,7 @@
 
 ## 📈 Posicoes Abertas
 
-> *Nenhuma posicao aberta no momento. Aguardando alinhamento de Alpha 12h > 24.0 bps com fluxo comprador CVD.*
+> *Nenhuma posicao aberta no momento. Aguardando alinhamento de Alpha 12h >= 36.0 bps com fluxo institucional CVD.*
 
 ## 🏆 Historico Recente de Operacoes Fechadas
 
