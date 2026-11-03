@@ -2,7 +2,13 @@ name: ci
 
 on:
   push:
+    paths-ignore:
+      - "reports/**"
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   tests:
@@ -14,7 +20,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install ".[ml,explain,dev]"
+      - run: python -m pip install --retries 5 --timeout 60 torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install --retries 5 --timeout 60 ".[ml,explain,dev]"
       - run: ruff check src tests dashboard
       - run: pytest --cov=bottrade --cov-report=term-missing -m "not integration and not slow"
       - run: bottrade --help

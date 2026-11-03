@@ -17,9 +17,6 @@ from bottrade.v4.backtest import (
 from bottrade.v4.config import V4Config
 from bottrade.v4.features import DirectDataset
 from bottrade.v5.config import V5Config
-from bottrade.v5.models.random_forest import RFEnsemble
-from bottrade.v5.models.transformer import PatchTransformerEnsemble
-from bottrade.v5.models.xgboost_ref import create_xgboost_reference
 from bottrade.validation import require_minimum_folds, walk_forward_folds
 
 
@@ -148,18 +145,24 @@ def run_ensemble_walk_forward(
 
     for fold in selected_folds:
         if model_name == "random_forest":
+            from bottrade.v5.models.random_forest import RFEnsemble
+
             ensemble = RFEnsemble.create(
                 config=config,
                 feature_names=dataset.feature_columns,
                 seeds=seeds_override,
             )
         elif model_name == "transformer":
+            from bottrade.v5.models.transformer import PatchTransformerEnsemble
+
             ensemble = PatchTransformerEnsemble.create(
                 config=config,
                 feature_names=dataset.feature_columns,
                 seeds=seeds_override,
             )
         elif model_name == "xgboost":
+            from bottrade.v5.models.xgboost_ref import create_xgboost_reference
+
             ensemble = create_xgboost_reference(
                 config=config,
                 feature_names=dataset.feature_columns,

@@ -22,7 +22,6 @@ from bottrade.utils import utc_now
 from bottrade.v4.config import V4Config
 from bottrade.v4.features import build_direct_dataset, build_features, load_raw_market
 from bottrade.v5.config import V5Config
-from bottrade.v5.models.xgboost_ref import create_xgboost_reference
 
 
 @dataclass
@@ -173,6 +172,8 @@ class PaperTradingV5:
                 y = np.clip(frame[dataset.target_column].to_numpy(dtype=np.float32), -0.06, 0.06)
                 window_rows = self.v5_config.train_months * 30 * 24
                 train_idx = np.arange(max(0, len(frame) - window_rows), len(frame))
+                from bottrade.v5.models.xgboost_ref import create_xgboost_reference
+
                 ensemble = create_xgboost_reference(config=self.v5_config, feature_names=dataset.feature_columns)
                 ensemble.fit(x, y, train_idx)
                 self.models[asset.value] = ensemble

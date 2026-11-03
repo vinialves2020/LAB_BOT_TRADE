@@ -24,10 +24,10 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Instalar Dependências do BOT_TRADE
+      - name: Instalar Dependências Leves de Inferência (ONNX Runtime)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[ml]"
+          python -m pip install --retries 5 --timeout 60 . "onnxruntime>=1.20,<2"
 
       - name: Executar Ciclo de Paper Trading V5 (Live Binance)
         env:
@@ -47,6 +47,10 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          cp reports/LIVE_DASHBOARD.md /tmp/LIVE_DASHBOARD.md
+          cp reports/DECISION_AUDIT.md /tmp/DECISION_AUDIT.md
+          cp reports/paper_state.json /tmp/paper_state.json
+          tail -n 1 reports/decisions.jsonl > /tmp/last_decision.jsonl
           git add reports/LIVE_DASHBOARD.md reports/DECISION_AUDIT.md reports/decisions.jsonl reports/paper_state.json
           if ! git diff --staged --quiet; then
             git commit -m "chore(paper): atualizar dashboard e log de auditoria [skip ci]"
@@ -54,7 +58,13 @@ jobs:
               git push origin main && break
               echo "Aviso: Push concorrente detectado (tentativa $attempt), sincronizando..."
               git fetch origin main
-              git rebase -X theirs origin/main || (git rebase --abort && git reset --soft origin/main && git commit -m "chore(paper): atualizar dashboard e log de auditoria [skip ci]")
+              git reset --hard origin/main
+              cp /tmp/LIVE_DASHBOARD.md reports/LIVE_DASHBOARD.md
+              cp /tmp/DECISION_AUDIT.md reports/DECISION_AUDIT.md
+              cp /tmp/paper_state.json reports/paper_state.json
+              cat /tmp/last_decision.jsonl >> reports/decisions.jsonl
+              git add reports/LIVE_DASHBOARD.md reports/DECISION_AUDIT.md reports/decisions.jsonl reports/paper_state.json
+              git commit -m "chore(paper): atualizar dashboard e log de auditoria [skip ci]"
               sleep 2
             done
           fi
