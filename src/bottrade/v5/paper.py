@@ -208,6 +208,7 @@ class PaperTradingV5:
         btc_latest = btc_features.iloc[-1]
         btc_24h_ret = float(btc_latest.get("return_24h", 0.0))
         btc_cvd_24h = float(btc_latest.get("cvd_ratio_24h", 0.0))
+        btc_cvd_6h = float(btc_latest.get("cvd_ratio_6h", 0.0))
 
         global_stop_cooldown = False
         if last_stop_str:
@@ -246,30 +247,96 @@ class PaperTradingV5:
             cvd_6h = float(latest_row.get("cvd_ratio_6h", 0.0))
             cvd_24h = float(latest_row.get("cvd_ratio_24h", 0.0))
 
-            # Alpha Composto Institucional V5.2 (Previsão Swing 12h + Impulso de Order Flow CVD)
+            # Alpha Composto Institucional V5.3 (Previsão Swing 12h + Impulso de Order Flow CVD)
             flow_bps = (cvd_24h * 120.0) + (cvd_6h * 80.0) + (btc_cvd_24h * 60.0)
             effective_bps = 0.55 * pred_mean_bps + 0.45 * flow_bps - 0.10 * pred_std_bps
-            # Gate de Entrada V5.2: 24.0 bps (taxa) + 12.0 bps (margem líquida mínima de segurança) = 36.0 bps
-            threshold_bps = float(self.v5_config.round_trip_bps + 12.0)
 
-            # Filtros inteligentes V5.2: regime, fluxo institucional, divergência de ensemble, anti-topo e tendência macro
-            vol_compressed = vol_ratio < 0.70
-            btc_dumping = btc_24h_ret < 0.0005
-            high_uncertainty = pred_std_bps > 20.0
-            weak_order_flow = not (
-                (cvd_24h >= 0.080)
-                and (cvd_6h >= 0.090)
-                and (btc_cvd_24h > -0.010)
-                and (pred_mean_bps >= 30.0)
-                and (flow_bps >= 22.0)
+            # Gate Dinâmico Escalonado por Volatilidade V5.3 (28.0 a 36.0 bps)
+            vol_discount = min(8.0, max(0.0, (vol_ratio - 0.80) * 12.0))
+            threshold_bps = round(max(28.0, min(36.0, float(self.v5_config.round_trip_bps + 12.0) - vol_discount)), 2)
+
+            # Travas Globais e Regimes Dual-Playbook V5.3 (Setup A: Breakout Ignition | Setup B: Dip Absorption)
+            vol_compressed = vol_ratio < 0.75
+            high_uncertainty = pred_std_bps > 19.5
+            macro_downtrend = (
+                close_to_ema_168 < -0.002
+                and close_to_ema_72 > 0.0
+                and not (vol_ratio >= 1.35 and pred_mean_bps >= 35.0 and btc_cvd_24h >= 0.060 and cvd_24h >= 0.060)
             )
-            macro_downtrend = close_to_ema_168 < -0.002 and close_to_ema_72 > 0.0
-            stretched_top = not (
-                (dist_high_24 < -0.008)
-                and (-0.015 < close_to_ema_24 <= 0.0090)
-                and (close_to_ema_72 <= 0.0105)
-                and (btc_24h_ret <= 0.0085)
+            not_late_under_weekly = not (close_to_ema_168 < 0.0 and close_to_ema_24 > 0.0065 and vol_ratio < 1.50)
+
+            setup_a = (
+                vol_ratio >= 0.75
+                and not_late_under_weekly
+                and 0.0010 <= btc_24h_ret <= 0.0320
+                and -0.0050 <= close_to_ema_24 <= 0.0090
+                and close_to_ema_72 <= 0.0105
+                and dist_high_24 <= -0.0060
+                and btc_cvd_24h >= 0.050
+                and (
+                    (
+                        effective_bps >= threshold_bps
+                        and pred_mean_bps >= 28.0
+                        and flow_bps >= 11.0
+                        and cvd_24h >= 0.060
+                        and (
+                            (cvd_6h >= 0.055 and btc_cvd_6h >= 0.025)
+                            or (
+                                vol_ratio >= 1.35
+                                and cvd_24h >= 0.090
+                                and btc_cvd_24h >= 0.060
+                                and pred_mean_bps >= 50.0
+                                and cvd_6h >= -0.130
+                            )
+                        )
+                    )
+                    or (
+                        vol_ratio >= 0.80
+                        and cvd_6h >= 0.150
+                        and cvd_24h >= 0.040
+                        and btc_cvd_24h >= 0.080
+                        and btc_cvd_6h >= 0.080
+                        and pred_mean_bps >= 14.0
+                        and flow_bps >= 22.0
+                        and close_to_ema_24 <= 0.0050
+                        and close_to_ema_72 <= 0.0020
+                    )
+                )
             )
+
+            setup_b = (
+                vol_ratio >= 0.75
+                and -0.0145 <= close_to_ema_24 < 0.0
+                and close_to_ema_72 < -0.0040
+                and dist_high_24 <= -0.0120
+                and -0.0150 <= btc_24h_ret <= 0.0080
+                and btc_cvd_24h >= 0.020
+                and (
+                    (
+                        cvd_6h >= 0.055
+                        and cvd_24h >= 0.024
+                        and btc_cvd_6h >= 0.050
+                        and pred_mean_bps >= 35.0
+                        and pred_std_bps <= 10.0
+                    )
+                    or (
+                        vol_ratio >= 0.85
+                        and cvd_24h >= 0.090
+                        and btc_cvd_24h >= 0.050
+                        and pred_mean_bps >= 40.0
+                    )
+                )
+            )
+
+            btc_dumping = (btc_24h_ret < -0.0150) or (close_to_ema_24 >= 0.0 and btc_24h_ret < 0.0010)
+            stretched_top = (
+                not not_late_under_weekly
+                or close_to_ema_24 > 0.0090
+                or close_to_ema_72 > 0.0105
+                or dist_high_24 > -0.0060
+                or btc_24h_ret > 0.0320
+            )
+            weak_order_flow = not (setup_a or setup_b)
 
             cooldown_active = False
             last_exit_str = last_exits.get(asset.value)
@@ -297,12 +364,24 @@ class PaperTradingV5:
                     opened_dt = datetime.fromisoformat(str(pos_info.get("opened_at", now_utc.isoformat())))
                 held_hours = max(0.0, (now_utc - opened_dt).total_seconds() / 3600.0)
 
-                trailing_stop = peak_gross >= max(0.0135, 1.8 * vol_1h) and gross <= (peak_gross * 0.68)
-                breakeven_lock = peak_gross >= 0.0095 and gross <= (peak_gross * 0.48)
-                early_cut = held_hours >= 1.5 and peak_gross < 0.0030 and gross <= -0.0045
-                hard_stop = gross <= -max(0.012, 1.9 * vol_1h)
+                if peak_gross >= 0.030:
+                    trailing_stop = gross <= (peak_gross * 0.82)
+                elif peak_gross >= max(0.0130, 1.8 * vol_1h):
+                    trailing_stop = gross <= (peak_gross * 0.72)
+                else:
+                    trailing_stop = False
+
+                breakeven_lock = peak_gross >= 0.0095 and gross <= (peak_gross * 0.52)
+                early_cut = (
+                    (held_hours >= 2.0 and peak_gross < 0.0030 and gross <= -0.0045)
+                    or (held_hours >= 2.5 and peak_gross >= 0.0060 and gross <= -0.0020)
+                )
+                hard_stop = gross <= -max(0.0120, 1.9 * vol_1h)
                 time_exit = held_hours >= float(self.v5_config.max_holding_hours)
-                reversal_exit = effective_bps < 0.0 or (held_hours >= 1.0 and btc_24h_ret < -0.005 and gross < -0.002)
+                reversal_exit = (
+                    (held_hours >= 1.5 and effective_bps < -2.5)
+                    or (held_hours >= 1.5 and btc_24h_ret < -0.015 and gross < -0.0025 and cvd_6h < 0.0)
+                )
 
                 if trailing_stop:
                     signal_label = "SELL"
@@ -326,29 +405,35 @@ class PaperTradingV5:
                     signal_label = "HOLD"
                     reason = f"Posição ativa há {held_hours:.1f}h (PnL: {gross*100:+.2f}% | Pico: {peak_gross*100:+.2f}%)"
             else:
-                if effective_bps >= threshold_bps:
-                    if global_stop_cooldown:
-                        reason = "Filtro: disjuntor global pós-Stop ativo (6h)"
-                    elif cooldown_active:
-                        reason = "Filtro: aguardando cooldown pós-trade (4h)"
-                    elif vol_compressed:
-                        reason = "Filtro: compressão de volatilidade (< 0.70)"
+                if global_stop_cooldown:
+                    reason = "Filtro: disjuntor global pós-Stop ativo (6h)"
+                elif cooldown_active:
+                    reason = "Filtro: aguardando cooldown pós-trade (4h)"
+                elif high_uncertainty:
+                    reason = f"Filtro: divergência alta no ensemble ({pred_std_bps:.1f} bps > 19.5)"
+                elif macro_downtrend:
+                    reason = "Filtro: armadilha de repique contra EMA semanal (168h)"
+                elif setup_a:
+                    signal_label = "BUY"
+                    reason = (
+                        f"Entrada Swing V5.3 [Setup A: Breakout Ignition] aprovada "
+                        f"(Alpha {effective_bps:+.1f} bps | Gate {threshold_bps:.1f} bps | CVD 24h {cvd_24h:+.3f})"
+                    )
+                elif setup_b:
+                    signal_label = "BUY"
+                    reason = (
+                        f"Entrada Swing V5.3 [Setup B: Dip Absorption] aprovada "
+                        f"(Alpha {effective_bps:+.1f} bps | ML {pred_mean_bps:+.1f} bps | CVD 6h {cvd_6h:+.3f})"
+                    )
+                elif effective_bps >= threshold_bps:
+                    if vol_compressed:
+                        reason = "Filtro: compressão de volatilidade (< 0.75)"
                     elif btc_dumping:
-                        reason = "Filtro: Bitcoin sem tração positiva em 24h"
-                    elif high_uncertainty:
-                        reason = f"Filtro: divergência alta no ensemble ({pred_std_bps:.1f} bps > 20)"
-                    elif weak_order_flow:
-                        reason = "Filtro: absorção institucional CVD 24h/6h insuficiente"
-                    elif macro_downtrend:
-                        reason = "Filtro: armadilha de repique contra EMA semanal (168h)"
+                        reason = "Filtro: Bitcoin sem tração para o regime atual"
                     elif stretched_top:
                         reason = "Filtro: preço já esticado acima das EMAs 24h/72h"
                     else:
-                        signal_label = "BUY"
-                        reason = (
-                            f"Entrada Swing V5.2 aprovada (Alpha {effective_bps:+.1f} bps >= "
-                            f"{threshold_bps:.1f} bps | CVD 24h {cvd_24h:+.3f})"
-                        )
+                        reason = "Filtro: confluência Dual-Setup (A/B) e absorção CVD insuficiente"
 
             signals.append(
                 PaperSignal(
@@ -575,7 +660,7 @@ class PaperTradingV5:
 
         lines = [
             "=" * 68,
-            "  [BOT] BOTTRADE V5.2 - SWING 12H & CVD ENGINE (ONLINE)",
+            "  [BOT] BOTTRADE V5.3 - SWING 12H & CVD ENGINE (ONLINE)",
             f"  Timestamp: {now_str} | Ledger: {self.ledger_name}",
             "=" * 68,
             f"  Patrimonio Liquido Total: ${total_equity:,.2f} USDT ({pnl_pct:+.2f}%)",
@@ -645,7 +730,7 @@ class PaperTradingV5:
         pnl_pct = (total_equity / 1000.0 - 1.0) * 100.0
 
         md_lines = [
-            "# 🤖 BOTTRADE V5.2 - Painel Oficial de Paper Trading (Swing 12h + CVD)",
+            "# 🤖 BOTTRADE V5.3 - Painel Oficial de Paper Trading (Swing 12h + CVD)",
             f"**Ultima Atualizacao**: `{now_str}` | **Ledger**: `{self.ledger_name}` | **Status**: 🟢 **ONLINE**",
             "",
             "## 💰 Resumo da Carteira",
@@ -684,7 +769,7 @@ class PaperTradingV5:
         active_positions = [p for p in positions_state.values() if float(p.get("quantity", 0.0)) > 0]
         if not active_positions:
             md_lines.append(
-                "> *Nenhuma posicao aberta no momento. Aguardando alinhamento de Alpha 12h >= 36.0 bps com fluxo institucional CVD.*"
+                "> *Nenhuma posicao aberta no momento. Aguardando confluencia Dual-Playbook V5.3 (Setup A: Breakout Ignition | Setup B: Dip Absorption) com fluxo institucional CVD.*"
             )
         else:
             md_lines.append("| Ativo | Quantidade | Preco Entrada | Preco Atual | Pico Atingido | PnL Aberto (%) |")
@@ -816,7 +901,7 @@ class PaperTradingV5:
         new_block = "\n".join(new_block_lines)
 
         header = (
-            "# 📋 BOT_TRADE V5.2 — Livro de Auditoria de Decisões e Análise de Mercado (Swing 12h + CVD)\n\n"
+            "# 📋 BOT_TRADE V5.3 — Livro de Auditoria de Decisões e Análise de Mercado (Swing 12h + CVD)\n\n"
             "Este documento registra o histórico contínuo das decisões tomadas pelo algoritmo a cada ciclo em tempo real na Binance.\n"
             "Ele permite auditar o Alpha Composto de 12h (Ensemble 5x XGBoost + Order Flow CVD) e o disparo de travas de proteção.\n\n"
             f"**Última Atualização**: `{now_str}` | **Ledger**: `{self.ledger_name}`\n\n"
