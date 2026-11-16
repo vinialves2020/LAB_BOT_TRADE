@@ -1,5 +1,5 @@
 # 🤖 BOTTRADE V5.3 - Painel Oficial de Paper Trading (Swing 12h + CVD)
-**Ultima Atualizacao**: `2026-11-16 02:15:53 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+**Ultima Atualizacao**: `2026-11-16 02:30:53 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
 ## 💰 Resumo da Carteira
 - **Patrimonio Liquido Total**: **$960.36 USDT** (`-3.96%`)
@@ -11,9 +11,9 @@
 
 | Ativo | Preco Atual | Sinal | Alpha Efetivo (12h) | ML 12h | Impulso CVD | Gate Custo | Status / Diagnostico |
 |:---|---:|:---:|---:|---:|---:|---:|:---|
-| **BTCUSDT** | $64,993.40 | ⚪ **CASH** | **+17.0 bps** | +57.9 bps | -27.1 bps | 36.0 bps | Filtro: divergência alta no ensemble (26.7 bps > 19.5) |
-| **ETHUSDT** | $1,820.79 | ⚪ **CASH** | **+4.8 bps** | +26.2 bps | -15.9 bps | 36.0 bps | Filtro: divergência alta no ensemble (24.4 bps > 19.5) |
-| **SOLUSDT** | $72.01 | ⚪ **CASH** | **-16.4 bps** | -17.2 bps | -11.1 bps | 36.0 bps | Filtro: divergência alta no ensemble (19.6 bps > 19.5) |
+| **BTCUSDT** | $65,215.42 | ⚪ **CASH** | **+17.0 bps** | +57.9 bps | -27.1 bps | 36.0 bps | Filtro: divergência alta no ensemble (26.7 bps > 19.5) |
+| **ETHUSDT** | $1,828.79 | ⚪ **CASH** | **+4.8 bps** | +26.2 bps | -15.9 bps | 36.0 bps | Filtro: divergência alta no ensemble (24.4 bps > 19.5) |
+| **SOLUSDT** | $72.46 | ⚪ **CASH** | **-16.4 bps** | -17.2 bps | -11.1 bps | 36.0 bps | Filtro: divergência alta no ensemble (19.6 bps > 19.5) |
 
 ## 📈 Posicoes Abertas
 
