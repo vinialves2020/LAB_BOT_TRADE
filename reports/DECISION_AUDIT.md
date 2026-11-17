@@ -3,9 +3,19 @@
 Este documento registra o histórico contínuo das decisões tomadas pelo algoritmo a cada ciclo em tempo real na Binance.
 Ele permite auditar o Alpha Composto de 12h (Ensemble 5x XGBoost + Order Flow CVD) e o disparo de travas de proteção.
 
-**Última Atualização**: `2026-11-17 18:00:53 UTC` | **Ledger**: `paper_1000`
+**Última Atualização**: `2026-11-17 18:15:45 UTC` | **Ledger**: `paper_1000`
 
 <!-- AUDIT_START -->
+### 🕒 Ciclo `2026-11-17 18:15:45 UTC` | Patrimônio: **$960.36 USDT** (Caixa: `$960.36`)
+
+| Ativo | Preço | Sinal | Alpha 12h Efetivo | ML 12h | Order Flow (CVD 24h/6h) | Volatilidade | Filtros de Risco | Racional Quantitativo |
+|:---|---:|:---:|---:|---:|:---:|:---:|:---|:---|
+| **BTCUSDT** | $63,660.71 | ⚪ **CASH** | **+11.2 bps** (±9.4) | `+6.2 bps` | `+0.092 / +0.037` | `0.66%/h` | `btc_dumping` `weak_order_flow` | Aguardando setup com assimetria (> 34.9 bps) |
+| **ETHUSDT** | $1,784.48 | ⚪ **CASH** | **-19.6 bps** (±8.8) | `-24.3 bps` | `-0.093 / -0.077` | `0.87%/h` | `btc_dumping` `weak_order_flow` | Aguardando setup com assimetria (> 34.5 bps) |
+| **SOLUSDT** | $72.06 | ⚪ **CASH** | **+13.6 bps** (±12.8) | `+35.9 bps` | `-0.097 / -0.059` | `0.90%/h` | `btc_dumping` `weak_order_flow` | Aguardando setup com assimetria (> 34.9 bps) |
+
+---
+
 ### 🕒 Ciclo `2026-11-17 18:00:53 UTC` | Patrimônio: **$960.36 USDT** (Caixa: `$960.36`)
 
 | Ativo | Preço | Sinal | Alpha 12h Efetivo | ML 12h | Order Flow (CVD 24h/6h) | Volatilidade | Filtros de Risco | Racional Quantitativo |
@@ -353,13 +363,3 @@ Ele permite auditar o Alpha Composto de 12h (Ensemble 5x XGBoost + Order Flow CV
 | **BTCUSDT** | $64,375.52 | ⚪ **CASH** | **+21.7 bps** (±7.6) | `+24.3 bps` | `+0.069 / +0.097` | `0.65%/h` | `weak_order_flow` | Aguardando setup com assimetria (> 36.0 bps) |
 | **ETHUSDT** | $1,810.70 | ⚪ **CASH** | **+19.4 bps** (±9.3) | `+42.1 bps` | `-0.022 / -0.098` | `0.82%/h` | `vol_compressed` `weak_order_flow` | Aguardando setup com assimetria (> 36.0 bps) |
 | **SOLUSDT** | $72.39 | ⚪ **CASH** | **-0.2 bps** (±9.2) | `+16.1 bps` | `-0.121 / -0.095` | `0.88%/h` | `btc_dumping` `weak_order_flow` | Aguardando setup com assimetria (> 35.7 bps) |
-
----
-
-### 🕒 Ciclo `2026-11-17 09:15:48 UTC` | Patrimônio: **$960.36 USDT** (Caixa: `$960.36`)
-
-| Ativo | Preço | Sinal | Alpha 12h Efetivo | ML 12h | Order Flow (CVD 24h/6h) | Volatilidade | Filtros de Risco | Racional Quantitativo |
-|:---|---:|:---:|---:|---:|:---:|:---:|:---|:---|
-| **BTCUSDT** | $64,246.41 | ⚪ **CASH** | **+21.7 bps** (±7.6) | `+24.3 bps` | `+0.069 / +0.097` | `0.65%/h` | `weak_order_flow` | Aguardando setup com assimetria (> 36.0 bps) |
-| **ETHUSDT** | $1,813.54 | ⚪ **CASH** | **+19.4 bps** (±9.3) | `+42.1 bps` | `-0.022 / -0.098` | `0.82%/h` | `vol_compressed` `weak_order_flow` | Aguardando setup com assimetria (> 36.0 bps) |
-| **SOLUSDT** | $72.19 | ⚪ **CASH** | **-0.2 bps** (±9.2) | `+16.1 bps` | `-0.121 / -0.095` | `0.88%/h` | `btc_dumping` `weak_order_flow` | Aguardando setup com assimetria (> 35.7 bps) |
