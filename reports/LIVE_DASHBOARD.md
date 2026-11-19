@@ -1,35 +1,39 @@
-# 🤖 BOTTRADE V5.3 - Painel Oficial de Paper Trading (Swing 12h + CVD)
-**Ultima Atualizacao**: `2026-11-19 19:15:47 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+# 🤖 BOTTRADE V6.0 - Painel Oficial de Paper Trading (Institutional CTA Long/Short 1x)
+**Ultima Atualizacao**: `2026-11-19 19:26:20 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
-## 💰 Resumo da Carteira
-- **Patrimonio Liquido Total**: **$960.36 USDT** (`-3.96%`)
-- **Caixa Disponivel**: **$960.36 USDT**
-- **Capital em Posicoes**: **$0.00 USDT**
+## 💰 Resumo da Carteira (1x Sem Alavancagem)
+- **Patrimonio Liquido Total**: **$960.07 USDT** (`-3.99%`)
+- **Caixa Disponivel**: **$593.76 USDT**
+- **Capital em Posicoes (Long + Short 1x)**: **$366.31 USDT**
 - **Trades Realizados**: **16** | **Taxa de Acerto (Win Rate)**: **31.2%** | **PnL Realizado**: **$-39.65 USDT**
 
-## 📊 Sinais e Previsoes em Tempo Real (Horizonte 12h + Order Flow CVD)
+## 📊 Sinais CTA em Tempo Real (TSMOM EMA 48h/168h/720h + Volatility Targeting + ML Tilt)
 
-| Ativo | Preco Atual | Sinal | Alpha Efetivo (12h) | ML 12h | Impulso CVD | Gate Custo | Status / Diagnostico |
-|:---|---:|:---:|---:|---:|---:|---:|:---|
-| **BTCUSDT** | $62,708.80 | ⚪ **CASH** | **+37.4 bps** | +75.4 bps | -5.4 bps | 36.0 bps | Filtro: compressão de volatilidade (< 0.75) |
-| **ETHUSDT** | $1,776.22 | ⚪ **CASH** | **+7.0 bps** | +21.4 bps | -9.1 bps | 36.0 bps | Aguardando setup com assimetria (> 36.0 bps) |
-| **SOLUSDT** | $73.81 | ⚪ **CASH** | **+10.6 bps** | +14.3 bps | +7.6 bps | 34.0 bps | Filtro: armadilha de repique contra EMA semanal (168h) |
+| Ativo | Preco Atual | Sinal | Spread EMA48/168 | Regime Macro (30d) | Vol Anual | ML 12h | Status / Diagnostico |
+|:---|---:|:---:|---:|:---:|---:|---:|:---|
+| **BTCUSDT** | $62,822.89 | 🔴 **SHORT** | **-3.50%** | `MACRO_BEAR` | `60%` | `+75.4 bps` | Entrada CTA SHORT 1x [A Favor do Macro] | Spread EMA48/168: -3.50% | Peso: 13.3% | Stop ATR: $65,692.32 |
+| **ETHUSDT** | $1,779.62 | 🔴 **SHORT** | **-3.48%** | `MACRO_BEAR` | `77%` | `+21.4 bps` | Entrada CTA SHORT 1x [A Favor do Macro] | Spread EMA48/168: -3.48% | Peso: 13.0% | Stop ATR: $1,879.89 |
+| **SOLUSDT** | $73.86 | 🔴 **SHORT** | **-2.01%** | `MACRO_BEAR` | `85%` | `+14.3 bps` | Entrada CTA SHORT 1x [A Favor do Macro] | Spread EMA48/168: -2.01% | Peso: 11.8% | Stop ATR: $78.51 |
 
-## 📈 Posicoes Abertas
+## 📈 Posicoes Abertas (Long & Short 1x)
 
-> *Nenhuma posicao aberta no momento. Aguardando confluencia Dual-Playbook V5.3 (Setup A: Breakout Ignition | Setup B: Dip Absorption) com fluxo institucional CVD.*
+| Ativo | Lado | Margem (USDT) | Preco Entrada | Preco Atual | Stop ATR (5.5x) | PnL Aberto (%) |
+|:---|:---:|---:|---:|---:|---:|---:|
+| **BTCUSDT** | 🔴 SHORT | $127.97 | $62,822.89 | $62,822.89 | $65,692.32 | **`+0.00%`** |
+| **ETHUSDT** | 🔴 SHORT | $124.75 | $1,779.62 | $1,779.62 | $1,879.89 | **`+0.00%`** |
+| **SOLUSDT** | 🔴 SHORT | $113.59 | $73.86 | $73.86 | $78.51 | **`+0.00%`** |
 
 ## 🏆 Historico Recente de Operacoes Fechadas
 
-| Ativo | Abertura | Fechamento | Entrada | Saida | PnL Liquido (%) | PnL (USDT) | Motivo da Saida |
-|:---|:---|:---|---:|---:|---:|---:|:---|
-| **ETHUSDT** | `2026-11-02T05:02` | `2026-11-02 17:03` | $2,293.39 | $2,270.16 | **`-1.25%`** | `$-1.80` | Alvo temporal de 12h concluído (-1.01%) |
-| **BTCUSDT** | `2026-11-02T05:02` | `2026-11-02 17:03` | $78,432.75 | $77,507.36 | **`-1.42%`** | `$-3.05` | Alvo temporal de 12h concluído (-1.18%) |
-| **SOLUSDT** | `2026-11-02T04:02` | `2026-11-02 07:47` | $95.63 | $94.29 | **`-1.64%`** | `$-5.25` | Stop Loss técnico acionado (-1.40%) |
-| **ETHUSDT** | `2026-10-29T19:47` | `2026-10-29 20:47` | $2,335.54 | $2,245.80 | **`-4.08%`** | `$-8.92` | Stop Loss técnico acionado (-3.84%) |
-| **BTCUSDT** | `2026-10-29T15:03` | `2026-10-29 20:47` | $81,263.95 | $78,614.96 | **`-3.50%`** | `$-11.48` | Stop Loss técnico acionado (-3.26%) |
-| **SOLUSDT** | `2026-10-29T15:03` | `2026-10-29 19:17` | $101.81 | $100.23 | **`-1.79%`** | `$-2.63` | Stop Loss técnico acionado (-1.55%) |
-| **ETHUSDT** | `2026-10-29T15:03` | `2026-10-29 16:32` | $2,346.68 | $2,357.90 | **`+0.24%`** | `$+0.52` | Trailing Stop acionado (pico +1.03%, realizou +0.48%) |
-| **ETHUSDT** | `2026-10-28T21:02` | `2026-10-29 02:02` | $2,360.55 | $2,317.01 | **`-2.08%`** | `$-4.60` | Stop Loss técnico acionado (-1.84%) |
-| **BTCUSDT** | `2026-10-28T10:02` | `2026-10-28 22:04` | $81,559.88 | $81,236.06 | **`-0.64%`** | `$-2.10` | Alvo temporal de 12h concluído (-0.40%) |
-| **SOLUSDT** | `2026-10-28T19:02` | `2026-10-28 20:17` | $102.12 | $102.67 | **`+0.30%`** | `$+0.66` | Trailing Stop acionado (pico +1.59%, realizou +0.54%) |
+| Ativo | Lado | Abertura | Fechamento | Entrada | Saida | PnL Liquido (%) | PnL (USDT) | Motivo da Saida |
+|:---|:---:|:---|:---|---:|---:|---:|---:|:---|
+| **ETHUSDT** | `LONG` | `2026-11-02T05:02` | `2026-11-02 17:03` | $2,293.39 | $2,270.16 | **`-1.25%`** | `$-1.80` | Alvo temporal de 12h concluído (-1.01%) |
+| **BTCUSDT** | `LONG` | `2026-11-02T05:02` | `2026-11-02 17:03` | $78,432.75 | $77,507.36 | **`-1.42%`** | `$-3.05` | Alvo temporal de 12h concluído (-1.18%) |
+| **SOLUSDT** | `LONG` | `2026-11-02T04:02` | `2026-11-02 07:47` | $95.63 | $94.29 | **`-1.64%`** | `$-5.25` | Stop Loss técnico acionado (-1.40%) |
+| **ETHUSDT** | `LONG` | `2026-10-29T19:47` | `2026-10-29 20:47` | $2,335.54 | $2,245.80 | **`-4.08%`** | `$-8.92` | Stop Loss técnico acionado (-3.84%) |
+| **BTCUSDT** | `LONG` | `2026-10-29T15:03` | `2026-10-29 20:47` | $81,263.95 | $78,614.96 | **`-3.50%`** | `$-11.48` | Stop Loss técnico acionado (-3.26%) |
+| **SOLUSDT** | `LONG` | `2026-10-29T15:03` | `2026-10-29 19:17` | $101.81 | $100.23 | **`-1.79%`** | `$-2.63` | Stop Loss técnico acionado (-1.55%) |
+| **ETHUSDT** | `LONG` | `2026-10-29T15:03` | `2026-10-29 16:32` | $2,346.68 | $2,357.90 | **`+0.24%`** | `$+0.52` | Trailing Stop acionado (pico +1.03%, realizou +0.48%) |
+| **ETHUSDT** | `LONG` | `2026-10-28T21:02` | `2026-10-29 02:02` | $2,360.55 | $2,317.01 | **`-2.08%`** | `$-4.60` | Stop Loss técnico acionado (-1.84%) |
+| **BTCUSDT** | `LONG` | `2026-10-28T10:02` | `2026-10-28 22:04` | $81,559.88 | $81,236.06 | **`-0.64%`** | `$-2.10` | Alvo temporal de 12h concluído (-0.40%) |
+| **SOLUSDT** | `LONG` | `2026-10-28T19:02` | `2026-10-28 20:17` | $102.12 | $102.67 | **`+0.30%`** | `$+0.66` | Trailing Stop acionado (pico +1.59%, realizou +0.54%) |

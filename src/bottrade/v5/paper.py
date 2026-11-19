@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -23,6 +24,21 @@ from bottrade.v4.config import V4Config
 from bottrade.v4.features import build_direct_dataset, build_features, load_raw_market
 from bottrade.v5.config import V5Config
 
+# Parâmetros Institucionais V6.0 (Regime-Weighted TSMOM CTA Long/Short 1x)
+# Validados em 5,5 anos (2021-2026: +144.1%, MaxDD -13.4%, Sharpe +1.15, todos os anos positivos)
+V6_PERP_FEE_RT_BPS = 16.0  # 10 bps Binance Futures Taker RT + 6 bps slippage conservador
+V6_EMA_FAST = 48  # Tendência 2 dias (48h)
+V6_EMA_SLOW = 168  # Tendência 7 dias (168h)
+V6_EMA_MACRO = 720  # Regime macro 30 dias (720h)
+V6_TREND_BUFFER = 0.008  # Histerese de 0.80% para eliminar ruído lateral
+V6_FLAT_BUFFER = 0.0024  # Zona neutra (0.30 * buffer) para saída limpa
+V6_ATR_WINDOW = 72  # ATR de 72h para Chandelier Trailing Stop
+V6_ATR_STOP_MULT = 5.5  # Chandelier Stop 5.5x ATR(72h)
+V6_HARD_STOP_PCT = 0.10  # Trava catastrófica máxima de -10% no ativo (~ -3.3% na carteira)
+V6_TARGET_ANN_VOL = 0.30  # Alvo de volatilidade anualizada da carteira (30% a.a. / 1x sem alavancagem)
+V6_COUNTER_TREND_SCALE = 0.45  # Peso reduzido (45%) quando contra o regime macro de 30 dias
+V6_MAX_ASSET_WEIGHT = 0.33  # Limite máximo de 33% do patrimônio por ativo (1x)
+
 
 @dataclass
 class PaperSignal:
@@ -30,7 +46,7 @@ class PaperSignal:
     prediction_bps: float
     effective_bps: float
     threshold_bps: float
-    signal: str  # "BUY", "SELL", "HOLD", "CASH"
+    signal: str  # "LONG", "SHORT", "CLOSE", "HOLD_LONG", "HOLD_SHORT", "CASH"
     reason: str
     current_price: float
     ewma_volatility_1h: float
@@ -45,11 +61,16 @@ class PaperSignal:
     dist_high_24: float = 0.0
     vol_ratio: float = 1.0
     btc_24h_ret: float = 0.0
+    macro_regime: str = "NEUTRAL"
+    trend_spread_pct: float = 0.0
+    ann_vol_pct: float = 0.0
+    atr_stop_price: float = 0.0
+    target_weight_pct: float = 0.0
     filters: dict[str, bool] = field(default_factory=dict)
 
 
 class PaperTradingV5:
-    """Motor oficial de Paper Trading V5 (Horizonte Swing 12h + Microestrutura CVD)."""
+    """Motor oficial de Paper Trading V6.0 (Institutional Regime-Weighted CTA Long/Short 1x + ML Tilt)."""
 
     def __init__(
         self,
@@ -77,12 +98,14 @@ class PaperTradingV5:
         """Carrega o estado persistente da carteira (compatível com execução stateless no GitHub Actions)."""
         default_state: dict[str, Any] = {
             "ledger": self.ledger_name,
+            "engine_version": "V6.0-CTA-LS1x",
             "initial_cash": 1000.0,
             "cash": 1000.0,
             "realized_pnl_usdt": 0.0,
             "closed_trades_count": 0,
             "winning_trades_count": 0,
             "positions": {},
+            "stopped_sides": {},
             "last_exit_times": {},
             "trade_history": [],
         }
@@ -91,6 +114,8 @@ class PaperTradingV5:
                 loaded = json.loads(self.state_path.read_text(encoding="utf-8"))
                 if isinstance(loaded, dict):
                     default_state.update(loaded)
+        default_state.setdefault("stopped_sides", {})
+        default_state["engine_version"] = "V6.0-CTA-LS1x"
         return default_state
 
     def _save_portfolio_state(self, state: dict[str, Any]) -> None:
@@ -106,22 +131,22 @@ class PaperTradingV5:
                 session.commit()
 
     def _fetch_market_frames(self, live: bool = True) -> dict[str, pd.DataFrame]:
-        """Obtém os candles horários mais recentes de BTC, ETH e SOL."""
+        """Obtém os últimos 1.000 candles horários (41,6 dias) de BTC, ETH e SOL para aquecer EMA 720h."""
         market: dict[str, pd.DataFrame] = {}
         if live:
             try:
                 for asset in Asset:
-                    df = self.binance_client.fetch_recent_klines(asset.value, limit=350, interval="1h")
+                    df = self.binance_client.fetch_recent_klines(asset.value, limit=1000, interval="1h")
                     market[asset.value] = df
                 return market
             except Exception:
                 pass
         for asset in Asset:
-            market[asset.value] = load_raw_market(self.app_config.project.data_dir, asset, "1h")
+            market[asset.value] = load_raw_market(self.app_config.project.data_dir, asset, "1h").tail(1000).reset_index(drop=True)
         return market
 
     def _ensure_models_trained(self, market: dict[str, pd.DataFrame]) -> None:
-        """Garante que os modelos campeões de 12h estejam carregados para inferência."""
+        """Garante que os modelos campeões ONNX de 12h estejam carregados para telemetria e sizing tilt."""
         v4_compat = V4Config(
             holdout_start=self.v5_config.holdout_start,
             holdout_end=self.v5_config.holdout_end,
@@ -179,8 +204,61 @@ class PaperTradingV5:
                 self.models[asset.value] = ensemble
                 self.feature_columns[asset.value] = list(dataset.feature_columns)
 
+    @staticmethod
+    def _position_gross_return(pos: dict[str, Any], cur_price: float) -> float:
+        entry_p = float(pos.get("entry_price", 0.0))
+        if entry_p <= 0:
+            return 0.0
+        side = str(pos.get("side", "LONG")).upper()
+        if side == "SHORT":
+            return 1.0 - (cur_price / entry_p)
+        return (cur_price / entry_p) - 1.0
+
+    @staticmethod
+    def _position_equity_value(pos: dict[str, Any], cur_price: float) -> float:
+        notional = float(pos.get("notional_usdt", float(pos.get("quantity", 0.0)) * float(pos.get("entry_price", 0.0))))
+        gross = PaperTradingV5._position_gross_return(pos, cur_price)
+        return max(0.0, notional * (1.0 + gross))
+
+    @staticmethod
+    def _compute_cta_indicators(df: pd.DataFrame) -> dict[str, float]:
+        """Calcula indicadores institucionais CTA (EMA 48/168/720, ATR 72h e Volatilidade Anualizada 168h)."""
+        close = df["close"].astype(float)
+        high = df["high"].astype(float)
+        low = df["low"].astype(float)
+
+        tr = pd.concat(
+            [(high - low), (high - close.shift(1)).abs(), (low - close.shift(1)).abs()],
+            axis=1,
+        ).max(axis=1)
+        atr_72 = float(tr.rolling(V6_ATR_WINDOW).mean().iloc[-1])
+        cur = float(close.iloc[-1])
+        if not np.isfinite(atr_72) or atr_72 <= 0:
+            atr_72 = cur * 0.015
+
+        vol_168 = float(close.pct_change().rolling(168).std().iloc[-1])
+        if not np.isfinite(vol_168) or vol_168 <= 0:
+            vol_168 = 0.008
+        ann_vol = vol_168 * math.sqrt(8760.0)
+
+        ema_48 = float(close.ewm(span=V6_EMA_FAST, adjust=False).mean().iloc[-1])
+        ema_168 = float(close.ewm(span=V6_EMA_SLOW, adjust=False).mean().iloc[-1])
+        ema_720 = float(close.ewm(span=V6_EMA_MACRO, adjust=False).mean().iloc[-1])
+        trend_spread = (ema_48 / ema_168 - 1.0) if ema_168 > 0 else 0.0
+
+        return {
+            "close": cur,
+            "ema_48": ema_48,
+            "ema_168": ema_168,
+            "ema_720": ema_720,
+            "atr_72": atr_72,
+            "vol_168": vol_168,
+            "ann_vol": ann_vol,
+            "trend_spread": trend_spread,
+        }
+
     def execute_cycle(self, live: bool = True) -> list[PaperSignal]:
-        """Executa um ciclo completo de inferência 12h, sinalização e execução simulada persistente."""
+        """Executa um ciclo completo do motor V6.0 Institutional Regime-Weighted CTA (Long/Short 1x)."""
         market = self._fetch_market_frames(live=live)
         self._ensure_models_trained(market)
 
@@ -200,24 +278,35 @@ class PaperTradingV5:
         state = self._load_portfolio_state()
         cash = float(state.get("cash", 1000.0))
         positions_state: dict[str, dict[str, Any]] = state.setdefault("positions", {})
+        stopped_sides: dict[str, str] = state.setdefault("stopped_sides", {})
         last_exits: dict[str, str] = state.setdefault("last_exit_times", {})
         trade_history: list[dict[str, Any]] = state.setdefault("trade_history", [])
-        last_stop_str = str(state.get("last_stop_loss_at", ""))
 
         btc_features = build_features(asset=Asset.BTCUSDT, market=market, intrahour=None, config=v4_compat)
         btc_latest = btc_features.iloc[-1]
         btc_24h_ret = float(btc_latest.get("return_24h", 0.0))
         btc_cvd_24h = float(btc_latest.get("cvd_ratio_24h", 0.0))
-        btc_cvd_6h = float(btc_latest.get("cvd_ratio_6h", 0.0))
 
-        global_stop_cooldown = False
-        if last_stop_str:
-            with contextlib.suppress(Exception):
-                stop_dt = datetime.fromisoformat(last_stop_str)
-                if (now_utc - stop_dt).total_seconds() < 6.0 * 3600.0:
-                    global_stop_cooldown = True
+        fee_side = V6_PERP_FEE_RT_BPS / 20_000.0
+        order_fills: list[tuple[PaperOrder, PaperFill]] = []
+
+        # Pré-calcular preços atuais para equity mark-to-market precisa
+        price_lookup = {
+            asset.value: float(market[asset.value].iloc[-1]["close"])
+            for asset in (Asset.BTCUSDT, Asset.ETHUSDT, Asset.SOLUSDT)
+        }
 
         for asset in (Asset.BTCUSDT, Asset.ETHUSDT, Asset.SOLUSDT):
+            df_asset = market[asset.value]
+            cta = self._compute_cta_indicators(df_asset)
+            curr_price = cta["close"]
+            ema_168 = cta["ema_168"]
+            ema_720 = cta["ema_720"]
+            atr_72 = cta["atr_72"]
+            ann_vol = cta["ann_vol"]
+            trend_spread = cta["trend_spread"]
+
+            # Telemetria auxiliar (features V4 + Ensemble 5x XGBoost ONNX para ML Conviction Tilt)
             features = build_features(asset=asset, market=market, intrahour=None, config=v4_compat)
             latest_row = features.iloc[-1]
             cols = self.feature_columns[asset.value]
@@ -234,8 +323,6 @@ class PaperTradingV5:
 
             pred_mean_bps = float(np.mean(preds)) * 10_000.0
             pred_std_bps = float(np.std(preds)) * 10_000.0
-
-            curr_price = float(market[asset.value].iloc[-1]["close"])
             vol_1h = float(latest_row.get("ewma_volatility_1h", 0.008))
             if not np.isfinite(vol_1h) or vol_1h <= 0:
                 vol_1h = 0.008
@@ -246,201 +333,250 @@ class PaperTradingV5:
             dist_high_24 = float(latest_row.get("close_to_previous_high_24h", 0.0))
             cvd_6h = float(latest_row.get("cvd_ratio_6h", 0.0))
             cvd_24h = float(latest_row.get("cvd_ratio_24h", 0.0))
-
-            # Alpha Composto Institucional V5.3 (Previsão Swing 12h + Impulso de Order Flow CVD)
             flow_bps = (cvd_24h * 120.0) + (cvd_6h * 80.0) + (btc_cvd_24h * 60.0)
-            effective_bps = 0.55 * pred_mean_bps + 0.45 * flow_bps - 0.10 * pred_std_bps
 
-            # Gate Dinâmico Escalonado por Volatilidade V5.3 (28.0 a 36.0 bps)
-            vol_discount = min(8.0, max(0.0, (vol_ratio - 0.80) * 12.0))
-            threshold_bps = round(max(28.0, min(36.0, float(self.v5_config.round_trip_bps + 12.0) - vol_discount)), 2)
+            # 1. Direção de Tendência Institucional TSMOM (EMA 48h vs EMA 168h com histerese de 0.80%)
+            macro_bull = ema_168 >= ema_720
+            macro_regime = "MACRO_BULL" if macro_bull else "MACRO_BEAR"
 
-            # Travas Globais e Regimes Dual-Playbook V5.3 (Setup A: Breakout Ignition | Setup B: Dip Absorption)
-            vol_compressed = vol_ratio < 0.75
-            high_uncertainty = pred_std_bps > 19.5
-            macro_downtrend = (
-                close_to_ema_168 < -0.002
-                and close_to_ema_72 > 0.0
-                and not (vol_ratio >= 1.35 and pred_mean_bps >= 35.0 and btc_cvd_24h >= 0.060 and cvd_24h >= 0.060)
-            )
-            not_late_under_weekly = not (close_to_ema_168 < 0.0 and close_to_ema_24 > 0.0065 and vol_ratio < 1.50)
+            raw_dir: str | None = None
+            if trend_spread > V6_TREND_BUFFER and curr_price > ema_168:
+                raw_dir = "LONG"
+            elif trend_spread < -V6_TREND_BUFFER and curr_price < ema_168:
+                raw_dir = "SHORT"
+            elif abs(trend_spread) <= V6_FLAT_BUFFER:
+                raw_dir = "FLAT"
 
-            setup_a = (
-                vol_ratio >= 0.75
-                and not_late_under_weekly
-                and 0.0010 <= btc_24h_ret <= 0.0320
-                and -0.0050 <= close_to_ema_24 <= 0.0090
-                and close_to_ema_72 <= 0.0105
-                and dist_high_24 <= -0.0060
-                and btc_cvd_24h >= 0.050
-                and (
-                    (
-                        effective_bps >= threshold_bps
-                        and pred_mean_bps >= 28.0
-                        and flow_bps >= 11.0
-                        and cvd_24h >= 0.060
-                        and (
-                            (cvd_6h >= 0.055 and btc_cvd_6h >= 0.025)
-                            or (
-                                vol_ratio >= 1.35
-                                and cvd_24h >= 0.090
-                                and btc_cvd_24h >= 0.060
-                                and pred_mean_bps >= 50.0
-                                and cvd_6h >= -0.130
-                            )
-                        )
-                    )
-                    or (
-                        vol_ratio >= 0.80
-                        and cvd_6h >= 0.150
-                        and cvd_24h >= 0.040
-                        and btc_cvd_24h >= 0.080
-                        and btc_cvd_6h >= 0.080
-                        and pred_mean_bps >= 14.0
-                        and flow_bps >= 22.0
-                        and close_to_ema_24 <= 0.0050
-                        and close_to_ema_72 <= 0.0020
-                    )
-                )
-            )
+            # Limpar bloqueio pós-Stop somente quando a tendência realmente neutralizar ou inverter
+            if asset.value in stopped_sides and raw_dir is not None and raw_dir != stopped_sides[asset.value]:
+                stopped_sides.pop(asset.value, None)
 
-            setup_b = (
-                vol_ratio >= 0.75
-                and -0.0145 <= close_to_ema_24 < 0.0
-                and close_to_ema_72 < -0.0040
-                and dist_high_24 <= -0.0120
-                and -0.0150 <= btc_24h_ret <= 0.0080
-                and btc_cvd_24h >= 0.020
-                and (
-                    (
-                        cvd_6h >= 0.055
-                        and cvd_24h >= 0.024
-                        and btc_cvd_6h >= 0.050
-                        and pred_mean_bps >= 35.0
-                        and pred_std_bps <= 10.0
-                    )
-                    or (
-                        vol_ratio >= 0.85
-                        and cvd_24h >= 0.090
-                        and btc_cvd_24h >= 0.050
-                        and pred_mean_bps >= 40.0
-                    )
-                )
-            )
-
-            btc_dumping = (btc_24h_ret < -0.0150) or (close_to_ema_24 >= 0.0 and btc_24h_ret < 0.0010)
-            stretched_top = (
-                not not_late_under_weekly
-                or close_to_ema_24 > 0.0090
-                or close_to_ema_72 > 0.0105
-                or dist_high_24 > -0.0060
-                or btc_24h_ret > 0.0320
-            )
-            weak_order_flow = not (setup_a or setup_b)
-
-            cooldown_active = False
-            last_exit_str = last_exits.get(asset.value)
-            if last_exit_str:
-                with contextlib.suppress(Exception):
-                    last_dt = datetime.fromisoformat(last_exit_str)
-                    if (now_utc - last_dt).total_seconds() < 4.0 * 3600.0:
-                        cooldown_active = True
+            stop_locked = stopped_sides.get(asset.value) == raw_dir if raw_dir in ("LONG", "SHORT") else False
 
             pos_info = positions_state.get(asset.value)
-            has_position = pos_info is not None and float(pos_info.get("quantity", 0.0)) > 0.0
+            has_pos = pos_info is not None and float(pos_info.get("quantity", 0.0)) > 0.0
 
             signal_label = "CASH"
-            reason = f"Aguardando setup com assimetria (> {threshold_bps:.1f} bps)"
+            reason = f"Tendência neutra ({trend_spread*100:+.2f}% dentro do buffer ±{V6_TREND_BUFFER*100:.2f}%)"
+            atr_stop_price = 0.0
+            target_weight_pct = 0.0
 
-            if has_position and pos_info is not None:
+            # 2. Gestão de Posição Aberta (Saída por Reversão de Tendência, Chandelier ATR 5.5x ou Hard Stop)
+            closed_this_cycle = False
+            if has_pos and pos_info is not None:
+                pos_side = str(pos_info.get("side", "LONG")).upper()
                 entry_p = float(pos_info["entry_price"])
-                gross = curr_price / entry_p - 1.0 if entry_p > 0 else 0.0
-                peak_p = max(float(pos_info.get("peak_price", entry_p)), curr_price)
-                pos_info["peak_price"] = peak_p
-                peak_gross = peak_p / entry_p - 1.0 if entry_p > 0 else 0.0
+                gross = self._position_gross_return(pos_info, curr_price)
 
                 opened_dt = now_utc
                 with contextlib.suppress(Exception):
                     opened_dt = datetime.fromisoformat(str(pos_info.get("opened_at", now_utc.isoformat())))
                 held_hours = max(0.0, (now_utc - opened_dt).total_seconds() / 3600.0)
 
-                if peak_gross >= 0.030:
-                    trailing_stop = gross <= (peak_gross * 0.82)
-                elif peak_gross >= max(0.0130, 1.8 * vol_1h):
-                    trailing_stop = gross <= (peak_gross * 0.72)
+                if pos_side == "LONG":
+                    peak_p = max(float(pos_info.get("peak_price", entry_p)), curr_price)
+                    pos_info["peak_price"] = round(peak_p, 4)
+                    atr_stop_price = peak_p - (V6_ATR_STOP_MULT * atr_72)
+                    atr_hit = curr_price <= atr_stop_price
+                    best_pct = (peak_p / entry_p - 1.0) * 100.0 if entry_p > 0 else 0.0
                 else:
-                    trailing_stop = False
+                    trough_p = min(float(pos_info.get("trough_price", entry_p)), curr_price)
+                    pos_info["trough_price"] = round(trough_p, 4)
+                    atr_stop_price = trough_p + (V6_ATR_STOP_MULT * atr_72)
+                    atr_hit = curr_price >= atr_stop_price
+                    best_pct = (1.0 - trough_p / entry_p) * 100.0 if entry_p > 0 else 0.0
 
-                breakeven_lock = peak_gross >= 0.0095 and gross <= (peak_gross * 0.52)
-                early_cut = (
-                    (held_hours >= 2.0 and peak_gross < 0.0030 and gross <= -0.0045)
-                    or (held_hours >= 2.5 and peak_gross >= 0.0060 and gross <= -0.0020)
-                )
-                hard_stop = gross <= -max(0.0120, 1.9 * vol_1h)
-                time_exit = held_hours >= float(self.v5_config.max_holding_hours)
-                reversal_exit = (
-                    (held_hours >= 1.5 and effective_bps < -2.5)
-                    or (held_hours >= 1.5 and btc_24h_ret < -0.015 and gross < -0.0025 and cvd_6h < 0.0)
-                )
+                pos_info["atr_stop_price"] = round(atr_stop_price, 4)
 
-                if trailing_stop:
-                    signal_label = "SELL"
-                    reason = f"Trailing Stop acionado (pico {peak_gross*100:+.2f}%, realizou {gross*100:+.2f}%)"
-                elif breakeven_lock:
-                    signal_label = "SELL"
-                    reason = f"Proteção de Lucro acionada (pico {peak_gross*100:+.2f}%, realizou {gross*100:+.2f}%)"
-                elif early_cut:
-                    signal_label = "SELL"
-                    reason = f"Corte rápido de falha de impulso ({gross*100:+.2f}%)"
-                elif hard_stop:
-                    signal_label = "SELL"
-                    reason = f"Stop Loss técnico acionado ({gross*100:+.2f}%)"
-                elif reversal_exit:
-                    signal_label = "SELL"
-                    reason = f"Saída por reversão/fraqueza ({effective_bps:+.1f} bps)"
-                elif time_exit:
-                    signal_label = "SELL"
-                    reason = f"Alvo temporal de {self.v5_config.max_holding_hours}h concluído ({gross*100:+.2f}%)"
+                exit_reason: str | None = None
+                is_stop_exit = False
+                if gross <= -V6_HARD_STOP_PCT:
+                    exit_reason = f"Hard Stop catastrófico {pos_side} ({gross*100:+.2f}%)"
+                    is_stop_exit = True
+                elif raw_dir is not None and raw_dir != pos_side:
+                    exit_reason = f"Inversão de tendência TSMOM {pos_side} -> {raw_dir} ({gross*100:+.2f}%)"
+                elif atr_hit:
+                    exit_reason = (
+                        f"Chandelier ATR(5.5x) {pos_side} acionado "
+                        f"(stop ${atr_stop_price:,.2f} | melhor {best_pct:+.2f}% | realizou {gross*100:+.2f}%)"
+                    )
+                    is_stop_exit = True
+
+                if exit_reason is not None:
+                    qty = float(pos_info["quantity"])
+                    entry_notional = float(pos_info.get("notional_usdt", qty * entry_p))
+                    entry_fee = float(pos_info.get("entry_fee_usdt", entry_notional * fee_side))
+                    gross_pnl_usdt = entry_notional * gross
+                    exit_notional = max(0.0, entry_notional * (1.0 + gross))
+                    exit_fee = exit_notional * fee_side
+                    net_pnl_usdt = gross_pnl_usdt - entry_fee - exit_fee
+                    net_pct = (net_pnl_usdt / entry_notional) * 100.0 if entry_notional > 0 else 0.0
+
+                    close_side = "SELL" if pos_side == "LONG" else "BUY"
+                    order_id = f"v6-{asset.value}-CLOSE-{pos_side}-{now_utc.strftime('%Y%m%d%H%M%S')}"
+                    order = PaperOrder(
+                        client_order_id=order_id,
+                        ledger=self.ledger_name,
+                        asset=asset,
+                        as_of=now_utc,
+                        side=close_side,
+                        quantity=Decimal(f"{qty:.6f}"),
+                        reference_price=Decimal(f"{curr_price:.4f}"),
+                        reason=exit_reason[:120],
+                    )
+                    fill = PaperFill(
+                        client_order_id=order_id,
+                        ledger=self.ledger_name,
+                        asset=asset,
+                        as_of=now_utc,
+                        side=close_side,
+                        quantity=Decimal(f"{qty:.6f}"),
+                        price=Decimal(f"{curr_price:.4f}"),
+                        fee=Decimal(f"{exit_fee:.6f}"),
+                        bid=Decimal(f"{curr_price * 0.9998:.4f}"),
+                        ask=Decimal(f"{curr_price * 1.0002:.4f}"),
+                        visible_depth_quantity=Decimal("10.0"),
+                        visible_depth_notional=Decimal("500000.0"),
+                        spread_bps=4.0,
+                        impact_bps=0.0,
+                    )
+                    order_fills.append((order, fill))
+                    cash += exit_notional - exit_fee
+
+                    state["realized_pnl_usdt"] = round(float(state.get("realized_pnl_usdt", 0.0)) + net_pnl_usdt, 4)
+                    state["closed_trades_count"] = int(state.get("closed_trades_count", 0)) + 1
+                    if net_pnl_usdt > 0:
+                        state["winning_trades_count"] = int(state.get("winning_trades_count", 0)) + 1
+
+                    trade_record = {
+                        "asset": asset.value,
+                        "side": pos_side,
+                        "opened_at": pos_info.get("opened_at", ""),
+                        "closed_at": now_utc.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                        "entry_price": round(entry_p, 4),
+                        "exit_price": round(curr_price, 4),
+                        "quantity": round(qty, 6),
+                        "gross_pnl_pct": round(gross * 100.0, 2),
+                        "net_pnl_pct": round(net_pct, 2),
+                        "net_pnl_usdt": round(net_pnl_usdt, 2),
+                        "exit_reason": exit_reason,
+                    }
+                    trade_history.insert(0, trade_record)
+                    state["trade_history"] = trade_history[:50]
+                    last_exits[asset.value] = now_utc.isoformat()
+                    if is_stop_exit:
+                        stopped_sides[asset.value] = pos_side
+                        stop_locked = True
+                    positions_state.pop(asset.value, None)
+                    has_pos = False
+                    closed_this_cycle = True
+                    signal_label = "CLOSE"
+                    reason = exit_reason
                 else:
-                    signal_label = "HOLD"
-                    reason = f"Posição ativa há {held_hours:.1f}h (PnL: {gross*100:+.2f}% | Pico: {peak_gross*100:+.2f}%)"
-            else:
-                if global_stop_cooldown:
-                    reason = "Filtro: disjuntor global pós-Stop ativo (6h)"
-                elif cooldown_active:
-                    reason = "Filtro: aguardando cooldown pós-trade (4h)"
-                elif high_uncertainty:
-                    reason = f"Filtro: divergência alta no ensemble ({pred_std_bps:.1f} bps > 19.5)"
-                elif macro_downtrend:
-                    reason = "Filtro: armadilha de repique contra EMA semanal (168h)"
-                elif setup_a:
-                    signal_label = "BUY"
+                    signal_label = f"HOLD_{pos_side}"
                     reason = (
-                        f"Entrada Swing V5.3 [Setup A: Breakout Ignition] aprovada "
-                        f"(Alpha {effective_bps:+.1f} bps | Gate {threshold_bps:.1f} bps | CVD 24h {cvd_24h:+.3f})"
+                        f"Posição {pos_side} ativa há {held_hours:.1f}h "
+                        f"(PnL: {gross*100:+.2f}% | Stop ATR: ${atr_stop_price:,.2f} | {macro_regime})"
                     )
-                elif setup_b:
-                    signal_label = "BUY"
-                    reason = (
-                        f"Entrada Swing V5.3 [Setup B: Dip Absorption] aprovada "
-                        f"(Alpha {effective_bps:+.1f} bps | ML {pred_mean_bps:+.1f} bps | CVD 6h {cvd_6h:+.3f})"
+
+            # 3. Nova Entrada Institucional (Permite reversão imediata se fechou por Flip para lado oposto)
+            if not has_pos and raw_dir in ("LONG", "SHORT") and not stop_locked:
+                is_aligned = (raw_dir == "LONG" and macro_bull) or (raw_dir == "SHORT" and not macro_bull)
+                regime_scale = 1.0 if is_aligned else V6_COUNTER_TREND_SCALE
+
+                # ML Conviction Tilt (XGBoost 5x ONNX ajusta tamanho em ±15% sem travar a tendência macro)
+                ml_tilt = 1.0
+                if pred_std_bps <= 20.0:
+                    if (raw_dir == "LONG" and pred_mean_bps >= 15.0) or (raw_dir == "SHORT" and pred_mean_bps <= -15.0):
+                        ml_tilt = 1.15
+                    elif (raw_dir == "LONG" and pred_mean_bps <= -35.0) or (raw_dir == "SHORT" and pred_mean_bps >= 35.0):
+                        ml_tilt = 0.80
+
+                # Dimensionamento Inverso à Volatilidade (Volatility Targeting 30% a.a., 1x sem alavancagem)
+                vol_weight = ((V6_TARGET_ANN_VOL / 3.0) / max(0.25, ann_vol)) * regime_scale * ml_tilt
+                weight = min(V6_MAX_ASSET_WEIGHT * regime_scale, max(0.10 * regime_scale, vol_weight))
+                target_weight_pct = weight * 100.0
+
+                open_eq = sum(
+                    self._position_equity_value(p, price_lookup.get(k, float(p["entry_price"])))
+                    for k, p in positions_state.items()
+                    if float(p.get("quantity", 0.0)) > 0
+                )
+                total_eq = cash + open_eq
+                trade_notional = min(cash * 0.95, total_eq * weight)
+
+                if trade_notional >= 50.0:
+                    qty = trade_notional / curr_price
+                    entry_fee = trade_notional * fee_side
+                    order_side = "BUY" if raw_dir == "LONG" else "SELL"
+                    order_id = f"v6-{asset.value}-OPEN-{raw_dir}-{now_utc.strftime('%Y%m%d%H%M%S')}"
+                    align_tag = "A Favor do Macro" if is_aligned else f"Contra-Macro ({int(regime_scale*100)}%)"
+                    atr_stop_price = (
+                        curr_price - V6_ATR_STOP_MULT * atr_72
+                        if raw_dir == "LONG"
+                        else curr_price + V6_ATR_STOP_MULT * atr_72
                     )
-                elif effective_bps >= threshold_bps:
-                    if vol_compressed:
-                        reason = "Filtro: compressão de volatilidade (< 0.75)"
-                    elif btc_dumping:
-                        reason = "Filtro: Bitcoin sem tração para o regime atual"
-                    elif stretched_top:
-                        reason = "Filtro: preço já esticado acima das EMAs 24h/72h"
-                    else:
-                        reason = "Filtro: confluência Dual-Setup (A/B) e absorção CVD insuficiente"
+                    entry_reason = (
+                        f"Entrada CTA {raw_dir} 1x [{align_tag}] | "
+                        f"Spread EMA48/168: {trend_spread*100:+.2f}% | Peso: {weight*100:.1f}% | "
+                        f"Stop ATR: ${atr_stop_price:,.2f}"
+                    )
+
+                    order = PaperOrder(
+                        client_order_id=order_id,
+                        ledger=self.ledger_name,
+                        asset=asset,
+                        as_of=now_utc,
+                        side=order_side,
+                        quantity=Decimal(f"{qty:.6f}"),
+                        reference_price=Decimal(f"{curr_price:.4f}"),
+                        reason=entry_reason[:120],
+                    )
+                    fill = PaperFill(
+                        client_order_id=order_id,
+                        ledger=self.ledger_name,
+                        asset=asset,
+                        as_of=now_utc,
+                        side=order_side,
+                        quantity=Decimal(f"{qty:.6f}"),
+                        price=Decimal(f"{curr_price:.4f}"),
+                        fee=Decimal(f"{entry_fee:.6f}"),
+                        bid=Decimal(f"{curr_price * 0.9998:.4f}"),
+                        ask=Decimal(f"{curr_price * 1.0002:.4f}"),
+                        visible_depth_quantity=Decimal("10.0"),
+                        visible_depth_notional=Decimal("500000.0"),
+                        spread_bps=4.0,
+                        impact_bps=0.0,
+                    )
+                    order_fills.append((order, fill))
+                    cash -= trade_notional + entry_fee
+                    positions_state[asset.value] = {
+                        "asset": asset.value,
+                        "side": raw_dir,
+                        "quantity": round(qty, 6),
+                        "entry_price": round(curr_price, 4),
+                        "peak_price": round(curr_price, 4),
+                        "trough_price": round(curr_price, 4),
+                        "atr_stop_price": round(atr_stop_price, 4),
+                        "notional_usdt": round(trade_notional, 2),
+                        "entry_fee_usdt": round(entry_fee, 4),
+                        "opened_at": now_utc.isoformat(),
+                        "macro_regime": macro_regime,
+                        "entry_ml_bps": round(pred_mean_bps, 2),
+                        "entry_reason": entry_reason,
+                    }
+                    signal_label = raw_dir
+                    reason = entry_reason
+            elif not has_pos and not closed_this_cycle and stop_locked:
+                signal_label = "CASH"
+                reason = f"Bloqueio anti-whipsaw pós-Stop ({stopped_sides.get(asset.value)}); aguardando reset de tendência"
 
             signals.append(
                 PaperSignal(
                     asset=asset.value,
                     prediction_bps=pred_mean_bps,
-                    effective_bps=effective_bps,
-                    threshold_bps=threshold_bps,
+                    effective_bps=trend_spread * 10_000.0,
+                    threshold_bps=V6_TREND_BUFFER * 10_000.0,
                     signal=signal_label,
                     reason=reason,
                     current_price=curr_price,
@@ -456,178 +592,18 @@ class PaperTradingV5:
                     dist_high_24=dist_high_24,
                     vol_ratio=vol_ratio,
                     btc_24h_ret=btc_24h_ret,
+                    macro_regime=macro_regime,
+                    trend_spread_pct=trend_spread * 100.0,
+                    ann_vol_pct=ann_vol * 100.0,
+                    atr_stop_price=atr_stop_price,
+                    target_weight_pct=target_weight_pct,
                     filters={
-                        "global_stop_cooldown": bool(global_stop_cooldown),
-                        "vol_compressed": bool(vol_compressed),
-                        "btc_dumping": bool(btc_dumping),
-                        "high_uncertainty": bool(high_uncertainty),
-                        "weak_order_flow": bool(weak_order_flow),
-                        "macro_downtrend": bool(macro_downtrend),
-                        "stretched_top": bool(stretched_top),
-                        "cooldown_active": bool(cooldown_active),
+                        "stop_locked": bool(stop_locked),
+                        "macro_bear": not macro_bull,
+                        "neutral_zone": raw_dir is None or raw_dir == "FLAT",
                     },
                 )
             )
-
-        # 2. Execução simulada das ordens (Estado JSON + SQLite)
-        # Processar vendas primeiro para liberar caixa e acionar disjuntor se houve Stop
-        order_fills: list[tuple[PaperOrder, PaperFill]] = []
-        price_lookup = {s.asset: s.current_price for s in signals}
-
-        for sig in signals:
-            asset_enum = Asset(sig.asset)
-            pos_info = positions_state.get(sig.asset)
-            has_pos = pos_info is not None and float(pos_info.get("quantity", 0.0)) > 0.0
-
-            if sig.signal == "SELL" and has_pos and pos_info is not None:
-                qty = float(pos_info["quantity"])
-                entry_p = float(pos_info["entry_price"])
-                entry_notional = float(pos_info.get("notional_usdt", qty * entry_p))
-                entry_fee = float(pos_info.get("entry_fee_usdt", entry_notional * 0.0012))
-                notional = qty * sig.current_price
-                exit_fee = notional * (self.v5_config.round_trip_bps / 20_000.0)
-                order_id = f"v5-{asset_enum.value}-SELL-{now_utc.strftime('%Y%m%d%H%M%S')}"
-                order = PaperOrder(
-                    client_order_id=order_id,
-                    ledger=self.ledger_name,
-                    asset=asset_enum,
-                    as_of=now_utc,
-                    side="SELL",
-                    quantity=Decimal(f"{qty:.6f}"),
-                    reference_price=Decimal(f"{sig.current_price:.4f}"),
-                    reason=sig.reason[:120],
-                )
-                fill = PaperFill(
-                    client_order_id=order_id,
-                    ledger=self.ledger_name,
-                    asset=asset_enum,
-                    as_of=now_utc,
-                    side="SELL",
-                    quantity=Decimal(f"{qty:.6f}"),
-                    price=Decimal(f"{sig.current_price:.4f}"),
-                    fee=Decimal(f"{exit_fee:.6f}"),
-                    bid=Decimal(f"{sig.current_price * 0.9998:.4f}"),
-                    ask=Decimal(f"{sig.current_price * 1.0002:.4f}"),
-                    visible_depth_quantity=Decimal("10.0"),
-                    visible_depth_notional=Decimal("500000.0"),
-                    spread_bps=4.0,
-                    impact_bps=0.0,
-                )
-                order_fills.append((order, fill))
-                cash += notional - exit_fee
-
-                net_pnl_usdt = (notional - exit_fee) - (entry_notional + entry_fee)
-                gross_pct = (sig.current_price / entry_p - 1.0) * 100.0 if entry_p > 0 else 0.0
-                net_pct = gross_pct - (self.v5_config.round_trip_bps / 100.0)
-
-                state["realized_pnl_usdt"] = round(float(state.get("realized_pnl_usdt", 0.0)) + net_pnl_usdt, 4)
-                state["closed_trades_count"] = int(state.get("closed_trades_count", 0)) + 1
-                if net_pnl_usdt > 0:
-                    state["winning_trades_count"] = int(state.get("winning_trades_count", 0)) + 1
-                if gross_pct < -0.30 or "Stop Loss" in sig.reason or "Corte rápido" in sig.reason:
-                    state["last_stop_loss_at"] = now_utc.isoformat()
-                    global_stop_cooldown = True
-
-                trade_record = {
-                    "asset": sig.asset,
-                    "opened_at": pos_info.get("opened_at", ""),
-                    "closed_at": now_utc.strftime("%Y-%m-%d %H:%M:%S UTC"),
-                    "entry_price": round(entry_p, 4),
-                    "exit_price": round(sig.current_price, 4),
-                    "quantity": round(qty, 6),
-                    "gross_pnl_pct": round(gross_pct, 2),
-                    "net_pnl_pct": round(net_pct, 2),
-                    "net_pnl_usdt": round(net_pnl_usdt, 2),
-                    "exit_reason": sig.reason,
-                }
-                trade_history.insert(0, trade_record)
-                state["trade_history"] = trade_history[:50]
-                last_exits[sig.asset] = now_utc.isoformat()
-                positions_state.pop(sig.asset, None)
-
-        # Processar compras ordenadas pelo maior Alpha, respeitando limite de correlação e disjuntor global
-        buy_candidates = sorted(
-            [s for s in signals if s.signal == "BUY"],
-            key=lambda item: item.effective_bps,
-            reverse=True,
-        )
-        for sig in buy_candidates:
-            asset_enum = Asset(sig.asset)
-            pos_info = positions_state.get(sig.asset)
-            has_pos = pos_info is not None and float(pos_info.get("quantity", 0.0)) > 0.0
-            active_pos_list = [p for p in positions_state.values() if float(p.get("quantity", 0.0)) > 0.0]
-
-            if has_pos or cash < 100.0:
-                continue
-            if global_stop_cooldown:
-                sig.signal = "CASH"
-                sig.reason = "Filtro: disjuntor global pós-Stop acionado neste ciclo"
-                continue
-            if len(active_pos_list) >= 2:
-                sig.signal = "CASH"
-                sig.reason = "Filtro: limite máximo de 2 posições simultâneas"
-                continue
-            if len(active_pos_list) == 1:
-                existing_p = active_pos_list[0]
-                ex_asset = str(existing_p["asset"])
-                ex_cur = price_lookup.get(ex_asset, float(existing_p["entry_price"]))
-                ex_gross = ex_cur / float(existing_p["entry_price"]) - 1.0
-                if ex_gross < 0.0020:
-                    sig.signal = "CASH"
-                    sig.reason = f"Filtro: aguardando 1ª posição ({ex_asset}) consolidar lucro (> +0.20%)"
-                    continue
-
-            open_notional = sum(
-                float(p["quantity"]) * price_lookup.get(str(p["asset"]), float(p["entry_price"]))
-                for p in active_pos_list
-            )
-            total_eq = cash + open_notional
-            trade_notional = min(cash * 0.95, total_eq * 0.33, 330.0)
-            if trade_notional < 100.0:
-                continue
-
-            qty = trade_notional / sig.current_price
-            fee = trade_notional * (self.v5_config.round_trip_bps / 20_000.0)
-            order_id = f"v5-{asset_enum.value}-BUY-{now_utc.strftime('%Y%m%d%H%M%S')}"
-            order = PaperOrder(
-                client_order_id=order_id,
-                ledger=self.ledger_name,
-                asset=asset_enum,
-                as_of=now_utc,
-                side="BUY",
-                quantity=Decimal(f"{qty:.6f}"),
-                reference_price=Decimal(f"{sig.current_price:.4f}"),
-                reason=sig.reason[:120],
-            )
-            fill = PaperFill(
-                client_order_id=order_id,
-                ledger=self.ledger_name,
-                asset=asset_enum,
-                as_of=now_utc,
-                side="BUY",
-                quantity=Decimal(f"{qty:.6f}"),
-                price=Decimal(f"{sig.current_price:.4f}"),
-                fee=Decimal(f"{fee:.6f}"),
-                bid=Decimal(f"{sig.current_price * 0.9998:.4f}"),
-                ask=Decimal(f"{sig.current_price * 1.0002:.4f}"),
-                visible_depth_quantity=Decimal("10.0"),
-                visible_depth_notional=Decimal("500000.0"),
-                spread_bps=4.0,
-                impact_bps=0.0,
-            )
-            order_fills.append((order, fill))
-            cash -= trade_notional + fee
-            positions_state[sig.asset] = {
-                "asset": sig.asset,
-                "quantity": round(qty, 6),
-                "entry_price": round(sig.current_price, 4),
-                "peak_price": round(sig.current_price, 4),
-                "notional_usdt": round(trade_notional, 2),
-                "entry_fee_usdt": round(fee, 4),
-                "opened_at": now_utc.isoformat(),
-                "entry_effective_bps": round(sig.effective_bps, 2),
-                "entry_reason": sig.reason,
-            }
 
         state["cash"] = round(cash, 4)
         self._save_portfolio_state(state)
@@ -639,7 +615,7 @@ class PaperTradingV5:
         return signals
 
     def get_status_summary(self, signals: list[PaperSignal]) -> str:
-        """Gera o painel de telemetria em formato markdown/ASCII para terminal e Telegram."""
+        """Gera o painel de telemetria em formato ASCII para terminal e Telegram."""
         state = self._load_portfolio_state()
         cash = float(state.get("cash", 1000.0))
         positions_state: dict[str, dict[str, Any]] = state.get("positions", {})
@@ -651,7 +627,7 @@ class PaperTradingV5:
         now_str = utc_now().strftime("%Y-%m-%d %H:%M:%S UTC")
         price_map = {s.asset: s.current_price for s in signals}
         pos_value = sum(
-            float(p["quantity"]) * price_map.get(asset_k, float(p["entry_price"]))
+            self._position_equity_value(p, price_map.get(asset_k, float(p["entry_price"])))
             for asset_k, p in positions_state.items()
             if float(p.get("quantity", 0.0)) > 0
         )
@@ -659,50 +635,58 @@ class PaperTradingV5:
         pnl_pct = (total_equity / 1000.0 - 1.0) * 100.0
 
         lines = [
-            "=" * 68,
-            "  [BOT] BOTTRADE V5.3 - SWING 12H & CVD ENGINE (ONLINE)",
+            "=" * 74,
+            "  [BOT] BOTTRADE V6.0 - INSTITUTIONAL CTA LONG/SHORT 1X (ONLINE)",
             f"  Timestamp: {now_str} | Ledger: {self.ledger_name}",
-            "=" * 68,
+            "=" * 74,
             f"  Patrimonio Liquido Total: ${total_equity:,.2f} USDT ({pnl_pct:+.2f}%)",
             f"  Caixa Disponivel:        ${cash:,.2f} USDT",
-            f"  Capital em Posicoes:     ${pos_value:,.2f} USDT",
+            f"  Margem em Posicoes (1x): ${pos_value:,.2f} USDT",
             f"  Trades Fechados:         {closed_count} (Win Rate: {win_rate:.1f}% | PnL Realizado: ${realized_pnl:+.2f})",
-            "-" * 68,
-            "  SINAIS & ALPHA COMPOSTO 12H (XGBoost + Order Flow CVD):",
+            "-" * 74,
+            "  SINAIS CTA (TSMOM EMA 48h/168h/720h + Volatility Targeting + ML Tilt):",
         ]
 
         for s in signals:
-            icon = (
-                "[COMPRA]"
-                if s.signal == "BUY"
-                else ("[VENDA]" if s.signal == "SELL" else ("[HOLD]" if s.signal == "HOLD" else "[CAIXA]"))
-            )
+            icon_map = {
+                "LONG": "[LONG]",
+                "SHORT": "[SHORT]",
+                "CLOSE": "[CLOSE]",
+                "HOLD_LONG": "[H-LONG]",
+                "HOLD_SHORT": "[H-SHRT]",
+                "CASH": "[CAIXA]",
+            }
+            icon = icon_map.get(s.signal, "[CAIXA]")
             lines.append(
-                f"  {icon:<8} {s.asset:<7} | Preco: ${s.current_price:>10,.2f} | Sinal: {s.signal:<4} | "
-                f"Alpha: {s.effective_bps:>+5.1f} bps (ML:{s.prediction_bps:+.1f} Flow:{s.flow_bps:+.1f} Gate:{s.threshold_bps:.0f}) | {s.reason}"
+                f"  {icon:<8} {s.asset:<7} | Preco: ${s.current_price:>10,.2f} | "
+                f"EMA48/168: {s.trend_spread_pct:>+5.2f}% | {s.macro_regime:<10} | "
+                f"ML12h: {s.prediction_bps:>+5.1f} bps | {s.reason}"
             )
 
         lines.extend([
-            "-" * 68,
-            "  POSICOES ATIVAS NA CARTEIRA:",
+            "-" * 74,
+            "  POSICOES ATIVAS NA CARTEIRA (1x SEM ALAVANCAGEM):",
         ])
 
         active_positions = [p for p in positions_state.values() if float(p.get("quantity", 0.0)) > 0]
         if not active_positions:
-            lines.append("  (Nenhuma posicao aberta no momento; aguardando gatilho de assimetria)")
+            lines.append("  (Nenhuma posicao aberta no momento; aguardando rompimento TSMOM ±0.80%)")
         else:
             for p in active_positions:
                 asset_name = str(p["asset"])
+                side = str(p.get("side", "LONG")).upper()
                 cur_p = price_map.get(asset_name, float(p["entry_price"]))
                 entry_p = float(p["entry_price"])
-                peak_p = float(p.get("peak_price", entry_p))
-                gross_pnl = (cur_p / entry_p - 1.0) * 100.0 if entry_p > 0 else 0.0
+                stop_p = float(p.get("atr_stop_price", 0.0))
+                gross_pnl = self._position_gross_return(p, cur_p) * 100.0
+                notional = float(p.get("notional_usdt", 0.0))
                 lines.append(
-                    f"  [POS] {asset_name:<7} | Qtd: {float(p['quantity']):.4f} | Entrada: ${entry_p:,.2f} | "
-                    f"Atual: ${cur_p:,.2f} | Pico: ${peak_p:,.2f} | PnL Aberto: {gross_pnl:+.2f}%"
+                    f"  [{side:<5}] {asset_name:<7} | Notional: ${notional:>6,.2f} | "
+                    f"Entrada: ${entry_p:,.2f} | Atual: ${cur_p:,.2f} | "
+                    f"Stop ATR: ${stop_p:,.2f} | PnL Aberto: {gross_pnl:+.2f}%"
                 )
 
-        lines.append("=" * 68)
+        lines.append("=" * 74)
         return "\n".join(lines)
 
     def notify_channels(self, signals: list[PaperSignal], text_summary: str) -> None:
@@ -722,7 +706,7 @@ class PaperTradingV5:
         now_str = utc_now().strftime("%Y-%m-%d %H:%M:%S UTC")
         price_map = {s.asset: s.current_price for s in signals}
         pos_value = sum(
-            float(p["quantity"]) * price_map.get(asset_k, float(p["entry_price"]))
+            self._position_equity_value(p, price_map.get(asset_k, float(p["entry_price"])))
             for asset_k, p in positions_state.items()
             if float(p.get("quantity", 0.0)) > 0
         )
@@ -730,59 +714,63 @@ class PaperTradingV5:
         pnl_pct = (total_equity / 1000.0 - 1.0) * 100.0
 
         md_lines = [
-            "# 🤖 BOTTRADE V5.3 - Painel Oficial de Paper Trading (Swing 12h + CVD)",
+            "# 🤖 BOTTRADE V6.0 - Painel Oficial de Paper Trading (Institutional CTA Long/Short 1x)",
             f"**Ultima Atualizacao**: `{now_str}` | **Ledger**: `{self.ledger_name}` | **Status**: 🟢 **ONLINE**",
             "",
-            "## 💰 Resumo da Carteira",
+            "## 💰 Resumo da Carteira (1x Sem Alavancagem)",
             f"- **Patrimonio Liquido Total**: **${total_equity:,.2f} USDT** (`{pnl_pct:+.2f}%`)",
             f"- **Caixa Disponivel**: **${cash:,.2f} USDT**",
-            f"- **Capital em Posicoes**: **${pos_value:,.2f} USDT**",
+            f"- **Capital em Posicoes (Long + Short 1x)**: **${pos_value:,.2f} USDT**",
             f"- **Trades Realizados**: **{closed_count}** | **Taxa de Acerto (Win Rate)**: **{win_rate:.1f}%** | **PnL Realizado**: **${realized_pnl:+.2f} USDT**",
             "",
-            "## 📊 Sinais e Previsoes em Tempo Real (Horizonte 12h + Order Flow CVD)",
+            "## 📊 Sinais CTA em Tempo Real (TSMOM EMA 48h/168h/720h + Volatility Targeting + ML Tilt)",
             "",
-            "| Ativo | Preco Atual | Sinal | Alpha Efetivo (12h) | ML 12h | Impulso CVD | Gate Custo | Status / Diagnostico |",
-            "|:---|---:|:---:|---:|---:|---:|---:|:---|",
+            "| Ativo | Preco Atual | Sinal | Spread EMA48/168 | Regime Macro (30d) | Vol Anual | ML 12h | Status / Diagnostico |",
+            "|:---|---:|:---:|---:|:---:|---:|---:|:---|",
         ]
 
+        badge_map = {
+            "LONG": "🟢 **LONG**",
+            "SHORT": "🔴 **SHORT**",
+            "CLOSE": "🚪 **CLOSE**",
+            "HOLD_LONG": "🟡 **HOLD LONG**",
+            "HOLD_SHORT": "🟠 **HOLD SHORT**",
+            "CASH": "⚪ **CASH**",
+        }
+
         for s in signals:
-            badge = (
-                "🟢 **BUY**"
-                if s.signal == "BUY"
-                else (
-                    "🔴 **SELL**"
-                    if s.signal == "SELL"
-                    else ("🟡 **HOLD**" if s.signal == "HOLD" else "⚪ **CASH**")
-                )
-            )
+            badge = badge_map.get(s.signal, "⚪ **CASH**")
             md_lines.append(
-                f"| **{s.asset}** | ${s.current_price:,.2f} | {badge} | **{s.effective_bps:+.1f} bps** | "
-                f"{s.prediction_bps:+.1f} bps | {s.flow_bps:+.1f} bps | {s.threshold_bps:.1f} bps | {s.reason} |"
+                f"| **{s.asset}** | ${s.current_price:,.2f} | {badge} | **{s.trend_spread_pct:+.2f}%** | "
+                f"`{s.macro_regime}` | `{s.ann_vol_pct:.0f}%` | `{s.prediction_bps:+.1f} bps` | {s.reason} |"
             )
 
         md_lines.extend([
             "",
-            "## 📈 Posicoes Abertas",
+            "## 📈 Posicoes Abertas (Long & Short 1x)",
             "",
         ])
 
         active_positions = [p for p in positions_state.values() if float(p.get("quantity", 0.0)) > 0]
         if not active_positions:
             md_lines.append(
-                "> *Nenhuma posicao aberta no momento. Aguardando confluencia Dual-Playbook V5.3 (Setup A: Breakout Ignition | Setup B: Dip Absorption) com fluxo institucional CVD.*"
+                "> *Nenhuma posicao aberta no momento. Aguardando confirmacao de tendencia TSMOM (EMA48/168 fora da zona neutra ±0.80%).*"
             )
         else:
-            md_lines.append("| Ativo | Quantidade | Preco Entrada | Preco Atual | Pico Atingido | PnL Aberto (%) |")
-            md_lines.append("|:---|---:|---:|---:|---:|---:|")
+            md_lines.append("| Ativo | Lado | Margem (USDT) | Preco Entrada | Preco Atual | Stop ATR (5.5x) | PnL Aberto (%) |")
+            md_lines.append("|:---|:---:|---:|---:|---:|---:|---:|")
             for p in active_positions:
                 asset_name = str(p["asset"])
+                side = str(p.get("side", "LONG")).upper()
+                side_badge = "🟢 LONG" if side == "LONG" else "🔴 SHORT"
                 cur_p = price_map.get(asset_name, float(p["entry_price"]))
                 entry_p = float(p["entry_price"])
-                peak_p = float(p.get("peak_price", entry_p))
-                gross_pnl = (cur_p / entry_p - 1.0) * 100.0 if entry_p > 0 else 0.0
+                stop_p = float(p.get("atr_stop_price", 0.0))
+                notional = float(p.get("notional_usdt", 0.0))
+                gross_pnl = self._position_gross_return(p, cur_p) * 100.0
                 md_lines.append(
-                    f"| **{asset_name}** | {float(p['quantity']):.4f} | ${entry_p:,.2f} | "
-                    f"${cur_p:,.2f} | ${peak_p:,.2f} | `{gross_pnl:+.2f}%` |"
+                    f"| **{asset_name}** | {side_badge} | ${notional:,.2f} | ${entry_p:,.2f} | "
+                    f"${cur_p:,.2f} | ${stop_p:,.2f} | **`{gross_pnl:+.2f}%`** |"
                 )
 
         if trade_history:
@@ -790,12 +778,13 @@ class PaperTradingV5:
                 "",
                 "## 🏆 Historico Recente de Operacoes Fechadas",
                 "",
-                "| Ativo | Abertura | Fechamento | Entrada | Saida | PnL Liquido (%) | PnL (USDT) | Motivo da Saida |",
-                "|:---|:---|:---|---:|---:|---:|---:|:---|",
+                "| Ativo | Lado | Abertura | Fechamento | Entrada | Saida | PnL Liquido (%) | PnL (USDT) | Motivo da Saida |",
+                "|:---|:---:|:---|:---|---:|---:|---:|---:|:---|",
             ])
             for tr in trade_history[:10]:
+                tr_side = str(tr.get("side", "LONG")).upper()
                 md_lines.append(
-                    f"| **{tr['asset']}** | `{str(tr['opened_at'])[:16]}` | `{str(tr['closed_at'])[:16]}` | "
+                    f"| **{tr['asset']}** | `{tr_side}` | `{str(tr['opened_at'])[:16]}` | `{str(tr['closed_at'])[:16]}` | "
                     f"${float(tr['entry_price']):,.2f} | ${float(tr['exit_price']):,.2f} | "
                     f"**`{float(tr['net_pnl_pct']):+.2f}%`** | `${float(tr['net_pnl_usdt']):+.2f}` | {tr['exit_reason']} |"
                 )
@@ -834,6 +823,7 @@ class PaperTradingV5:
         jsonl_path = reports_dir / "decisions.jsonl"
         cycle_record = {
             "timestamp": now_str,
+            "engine_version": "V6.0-CTA-LS1x",
             "total_equity": round(total_equity, 2),
             "cash": round(cash, 2),
             "signals": [
@@ -841,6 +831,10 @@ class PaperTradingV5:
                     "asset": s.asset,
                     "price": round(s.current_price, 4),
                     "signal": s.signal,
+                    "macro_regime": s.macro_regime,
+                    "trend_spread_pct": round(s.trend_spread_pct, 3),
+                    "ann_vol_pct": round(s.ann_vol_pct, 1),
+                    "atr_stop_price": round(s.atr_stop_price, 4),
                     "effective_bps": round(s.effective_bps, 2),
                     "pred_mean_bps": round(s.prediction_bps, 2),
                     "flow_bps": round(s.flow_bps, 2),
@@ -875,35 +869,34 @@ class PaperTradingV5:
         old_blocks = [b.strip() for b in old_body.split("\n---\n") if b.strip()]
         kept_blocks = old_blocks[:35]
 
+        badge_map = {
+            "LONG": "🟢 **LONG**",
+            "SHORT": "🔴 **SHORT**",
+            "CLOSE": "🚪 **CLOSE**",
+            "HOLD_LONG": "🟡 **HOLD LONG**",
+            "HOLD_SHORT": "🟠 **HOLD SHORT**",
+            "CASH": "⚪ **CASH**",
+        }
+
         new_block_lines = [
             f"### 🕒 Ciclo `{now_str}` | Patrimônio: **${total_equity:,.2f} USDT** (Caixa: `${cash:,.2f}`)",
             "",
-            "| Ativo | Preço | Sinal | Alpha 12h Efetivo | ML 12h | Order Flow (CVD 24h/6h) | Volatilidade | Filtros de Risco | Racional Quantitativo |",
-            "|:---|---:|:---:|---:|---:|:---:|:---:|:---|:---|",
+            "| Ativo | Preço | Sinal | Spread EMA48/168 | Regime Macro | Vol Anual | ML 12h | Racional Quantitativo |",
+            "|:---|---:|:---:|---:|:---:|---:|---:|:---|",
         ]
         for s in signals:
-            badge = (
-                "🟢 **BUY**"
-                if s.signal == "BUY"
-                else (
-                    "🔴 **SELL**"
-                    if s.signal == "SELL"
-                    else ("🟡 **HOLD**" if s.signal == "HOLD" else "⚪ **CASH**")
-                )
-            )
-            active_filters = [f"`{k}`" for k, v in s.filters.items() if v]
-            flt_str = " ".join(active_filters) if active_filters else "Liberado ✅"
+            badge = badge_map.get(s.signal, "⚪ **CASH**")
             new_block_lines.append(
-                f"| **{s.asset}** | ${s.current_price:,.2f} | {badge} | **{s.effective_bps:+.1f} bps** (±{s.pred_std_bps:.1f}) | "
-                f"`{s.prediction_bps:+.1f} bps` | `{s.cvd_24h:+.3f} / {s.cvd_6h:+.3f}` | `{s.ewma_volatility_1h*100:.2f}%/h` | {flt_str} | {s.reason} |"
+                f"| **{s.asset}** | ${s.current_price:,.2f} | {badge} | **{s.trend_spread_pct:+.2f}%** | "
+                f"`{s.macro_regime}` | `{s.ann_vol_pct:.0f}%` | `{s.prediction_bps:+.1f} bps` | {s.reason} |"
             )
 
         new_block = "\n".join(new_block_lines)
 
         header = (
-            "# 📋 BOT_TRADE V5.3 — Livro de Auditoria de Decisões e Análise de Mercado (Swing 12h + CVD)\n\n"
-            "Este documento registra o histórico contínuo das decisões tomadas pelo algoritmo a cada ciclo em tempo real na Binance.\n"
-            "Ele permite auditar o Alpha Composto de 12h (Ensemble 5x XGBoost + Order Flow CVD) e o disparo de travas de proteção.\n\n"
+            "# 📋 BOT_TRADE V6.0 — Livro de Auditoria Institucional (CTA Long/Short 1x)\n\n"
+            "Este documento registra o histórico contínuo das decisões tomadas pelo algoritmo **V6.0 Institutional Regime-Weighted CTA** na Binance.\n"
+            "Opera comprado (`LONG 1x`) e vendido (`SHORT 1x`) guiado por Momentum Multi-Dias (`EMA 48h/168h/720h`), dimensionamento inverso à volatilidade (`30% Vol Target`), Chandelier ATR Stop (`5.5x`) e ajuste de convicção via Ensemble 5x XGBoost.\n\n"
             f"**Última Atualização**: `{now_str}` | **Ledger**: `{self.ledger_name}`\n\n"
             f"{header_marker}"
         )

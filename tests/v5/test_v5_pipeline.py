@@ -149,3 +149,34 @@ def test_predictive_metrics_and_gate_evaluation() -> None:
     gates_bad = evaluate_gates(bad_backtest, config)
     assert gates_bad["overall"] is False
     assert gates_bad["frequency"] is False
+
+
+def test_v6_cta_bidirectional_accounting_and_indicators() -> None:
+    import pandas as pd
+
+    from bottrade.v5.paper import PaperTradingV5
+
+    # Verify LONG and SHORT 1x collateralized PnL symmetry
+    long_pos = {"side": "LONG", "entry_price": 100.0, "notional_usdt": 300.0, "quantity": 3.0}
+    short_pos = {"side": "SHORT", "entry_price": 100.0, "notional_usdt": 300.0, "quantity": 3.0}
+
+    assert abs(PaperTradingV5._position_gross_return(long_pos, 110.0) - 0.10) < 1e-9
+    assert abs(PaperTradingV5._position_equity_value(long_pos, 110.0) - 330.0) < 1e-9
+    assert abs(PaperTradingV5._position_gross_return(short_pos, 90.0) - 0.10) < 1e-9
+    assert abs(PaperTradingV5._position_equity_value(short_pos, 90.0) - 330.0) < 1e-9
+    assert abs(PaperTradingV5._position_gross_return(short_pos, 110.0) - (-0.10)) < 1e-9
+    assert abs(PaperTradingV5._position_equity_value(short_pos, 110.0) - 270.0) < 1e-9
+
+    # Verify CTA indicator calculation on a clean downtrend
+    prices = np.linspace(120.0, 80.0, 800)
+    df = pd.DataFrame({
+        "open": prices,
+        "high": prices * 1.005,
+        "low": prices * 0.995,
+        "close": prices,
+    })
+    ind = PaperTradingV5._compute_cta_indicators(df)
+    assert ind["ema_48"] < ind["ema_168"] < ind["ema_720"]
+    assert ind["trend_spread"] < -0.008
+    assert ind["atr_72"] > 0
+    assert ind["ann_vol"] > 0
