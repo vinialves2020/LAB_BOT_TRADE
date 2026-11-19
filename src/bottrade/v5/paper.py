@@ -398,7 +398,7 @@ class PaperTradingV5:
                 elif atr_hit:
                     exit_reason = (
                         f"Chandelier ATR(5.5x) {pos_side} acionado "
-                        f"(stop ${atr_stop_price:,.2f} | melhor {best_pct:+.2f}% | realizou {gross*100:+.2f}%)"
+                        f"(stop ${atr_stop_price:,.2f} · melhor {best_pct:+.2f}% · realizou {gross*100:+.2f}%)"
                     )
                     is_stop_exit = True
 
@@ -476,7 +476,7 @@ class PaperTradingV5:
                     signal_label = f"HOLD_{pos_side}"
                     reason = (
                         f"Posição {pos_side} ativa há {held_hours:.1f}h "
-                        f"(PnL: {gross*100:+.2f}% | Stop ATR: ${atr_stop_price:,.2f} | {macro_regime})"
+                        f"(PnL: {gross*100:+.2f}% · Stop ATR: ${atr_stop_price:,.2f} · {macro_regime})"
                     )
 
             # 3. Nova Entrada Institucional (Permite reversão imediata se fechou por Flip para lado oposto)
@@ -517,8 +517,8 @@ class PaperTradingV5:
                         else curr_price + V6_ATR_STOP_MULT * atr_72
                     )
                     entry_reason = (
-                        f"Entrada CTA {raw_dir} 1x [{align_tag}] | "
-                        f"Spread EMA48/168: {trend_spread*100:+.2f}% | Peso: {weight*100:.1f}% | "
+                        f"Entrada CTA {raw_dir} 1x [{align_tag}] · "
+                        f"Spread EMA48/168: {trend_spread*100:+.2f}% · Peso: {weight*100:.1f}% · "
                         f"Stop ATR: ${atr_stop_price:,.2f}"
                     )
 
