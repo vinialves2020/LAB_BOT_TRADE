@@ -3,9 +3,19 @@
 Este documento registra o histórico contínuo das decisões tomadas pelo algoritmo **V6.0 Institutional Regime-Weighted CTA** na Binance.
 Opera comprado (`LONG 1x`) e vendido (`SHORT 1x`) guiado por Momentum Multi-Dias (`EMA 48h/168h/720h`), dimensionamento inverso à volatilidade (`30% Vol Target`), Chandelier ATR Stop (`5.5x`) e ajuste de convicção via Ensemble 5x XGBoost.
 
-**Última Atualização**: `2026-11-19 20:00:57 UTC` | **Ledger**: `paper_1000`
+**Última Atualização**: `2026-11-19 20:15:42 UTC` | **Ledger**: `paper_1000`
 
 <!-- AUDIT_START -->
+### 🕒 Ciclo `2026-11-19 20:15:42 UTC` | Patrimônio: **$963.31 USDT** (Caixa: `$593.76`)
+
+| Ativo | Preço | Sinal | Spread EMA48/168 | Regime Macro | Vol Anual | ML 12h | Racional Quantitativo |
+|:---|---:|:---:|---:|:---:|---:|---:|:---|
+| **BTCUSDT** | $62,298.00 | 🟠 **HOLD SHORT** | **-3.54%** | `MACRO_BEAR` | `60%` | `+84.1 bps` | Posição SHORT ativa há 0.8h (PnL: +0.84% · Stop ATR: $65,121.03 · MACRO_BEAR) |
+| **ETHUSDT** | $1,762.12 | 🟠 **HOLD SHORT** | **-3.50%** | `MACRO_BEAR` | `77%` | `+24.0 bps` | Posição SHORT ativa há 0.8h (PnL: +0.98% · Stop ATR: $1,862.89 · MACRO_BEAR) |
+| **SOLUSDT** | $73.25 | 🟠 **HOLD SHORT** | **-2.03%** | `MACRO_BEAR` | `85%` | `+11.5 bps` | Posição SHORT ativa há 0.8h (PnL: +0.83% · Stop ATR: $77.91 · MACRO_BEAR) |
+
+---
+
 ### 🕒 Ciclo `2026-11-19 20:00:57 UTC` | Patrimônio: **$962.87 USDT** (Caixa: `$593.76`)
 
 | Ativo | Preço | Sinal | Spread EMA48/168 | Regime Macro | Vol Anual | ML 12h | Racional Quantitativo |
@@ -353,13 +363,3 @@ Opera comprado (`LONG 1x`) e vendido (`SHORT 1x`) guiado por Momentum Multi-Dias
 | **BTCUSDT** | $63,943.99 | ⚪ **CASH** | **+36.5 bps** (±17.7) | `+69.0 bps` | `+0.006 / -0.005` | `0.51%/h` | `vol_compressed` `btc_dumping` `weak_order_flow` | Filtro: compressão de volatilidade (< 0.75) |
 | **ETHUSDT** | $1,809.43 | ⚪ **CASH** | **-1.0 bps** (±5.0) | `-3.3 bps` | `-0.011 / +0.048` | `0.61%/h` | `vol_compressed` `btc_dumping` `weak_order_flow` `stretched_top` | Aguardando setup com assimetria (> 36.0 bps) |
 | **SOLUSDT** | $74.82 | ⚪ **CASH** | **+14.7 bps** (±4.8) | `+16.1 bps` | `+0.042 / +0.109` | `0.68%/h` | `vol_compressed` `btc_dumping` `weak_order_flow` `macro_downtrend` | Filtro: armadilha de repique contra EMA semanal (168h) |
-
----
-
-### 🕒 Ciclo `2026-11-19 11:15:43 UTC` | Patrimônio: **$960.36 USDT** (Caixa: `$960.36`)
-
-| Ativo | Preço | Sinal | Alpha 12h Efetivo | ML 12h | Order Flow (CVD 24h/6h) | Volatilidade | Filtros de Risco | Racional Quantitativo |
-|:---|---:|:---:|---:|---:|:---:|:---:|:---|:---|
-| **BTCUSDT** | $63,767.71 | ⚪ **CASH** | **+36.5 bps** (±17.7) | `+69.0 bps` | `+0.006 / -0.005` | `0.51%/h` | `vol_compressed` `btc_dumping` `weak_order_flow` | Filtro: compressão de volatilidade (< 0.75) |
-| **ETHUSDT** | $1,803.59 | ⚪ **CASH** | **-1.0 bps** (±5.0) | `-3.3 bps` | `-0.011 / +0.048` | `0.61%/h` | `vol_compressed` `btc_dumping` `weak_order_flow` `stretched_top` | Aguardando setup com assimetria (> 36.0 bps) |
-| **SOLUSDT** | $74.52 | ⚪ **CASH** | **+14.7 bps** (±4.8) | `+16.1 bps` | `+0.042 / +0.109` | `0.68%/h` | `vol_compressed` `btc_dumping` `weak_order_flow` `macro_downtrend` | Filtro: armadilha de repique contra EMA semanal (168h) |
