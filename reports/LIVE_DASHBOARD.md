@@ -1,27 +1,27 @@
 # 🤖 BOTTRADE V6.0 - Painel Oficial de Paper Trading (Institutional CTA Long/Short 1x)
-**Ultima Atualizacao**: `2026-11-20 11:45:50 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+**Ultima Atualizacao**: `2026-11-20 12:00:57 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
 ## 💰 Resumo da Carteira (1x Sem Alavancagem)
-- **Patrimonio Liquido Total**: **$967.02 USDT** (`-3.30%`)
+- **Patrimonio Liquido Total**: **$967.45 USDT** (`-3.26%`)
 - **Caixa Disponivel**: **$593.76 USDT**
-- **Capital em Posicoes (Long + Short 1x)**: **$373.26 USDT**
+- **Capital em Posicoes (Long + Short 1x)**: **$373.69 USDT**
 - **Trades Realizados**: **16** | **Taxa de Acerto (Win Rate)**: **31.2%** | **PnL Realizado**: **$-39.65 USDT**
 
 ## 📊 Sinais CTA em Tempo Real (TSMOM EMA 48h/168h/720h + Volatility Targeting + ML Tilt)
 
 | Ativo | Preco Atual | Sinal | Spread EMA48/168 | Regime Macro (30d) | Vol Anual | ML 12h | Status / Diagnostico |
 |:---|---:|:---:|---:|:---:|---:|---:|:---|
-| **BTCUSDT** | $61,836.01 | 🟠 **HOLD SHORT** | **-3.77%** | `MACRO_BEAR` | `60%` | `+54.2 bps` | Posição SHORT ativa há 16.3h (PnL: +1.57% · Stop ATR: $64,610.81 · MACRO_BEAR) |
-| **ETHUSDT** | $1,750.41 | 🟠 **HOLD SHORT** | **-3.67%** | `MACRO_BEAR` | `75%` | `+17.8 bps` | Posição SHORT ativa há 16.3h (PnL: +1.64% · Stop ATR: $1,828.11 · MACRO_BEAR) |
-| **SOLUSDT** | $71.98 | 🟠 **HOLD SHORT** | **-2.25%** | `MACRO_BEAR` | `84%` | `-8.4 bps` | Posição SHORT ativa há 16.3h (PnL: +2.55% · Stop ATR: $76.70 · MACRO_BEAR) |
+| **BTCUSDT** | $61,828.01 | 🟠 **HOLD SHORT** | **-3.77%** | `MACRO_BEAR` | `60%` | `+76.4 bps` | Posição SHORT ativa há 16.6h (PnL: +1.58% · Stop ATR: $64,590.97 · MACRO_BEAR) |
+| **ETHUSDT** | $1,749.38 | 🟠 **HOLD SHORT** | **-3.67%** | `MACRO_BEAR` | `75%` | `+16.7 bps` | Posição SHORT ativa há 16.6h (PnL: +1.70% · Stop ATR: $1,827.32 · MACRO_BEAR) |
+| **SOLUSDT** | $71.76 | 🟠 **HOLD SHORT** | **-2.29%** | `MACRO_BEAR` | `84%` | `-7.2 bps` | Posição SHORT ativa há 16.6h (PnL: +2.84% · Stop ATR: $76.59 · MACRO_BEAR) |
 
 ## 📈 Posicoes Abertas (Long & Short 1x)
 
 | Ativo | Lado | Margem (USDT) | Preco Entrada | Preco Atual | Stop ATR (5.5x) | PnL Aberto (%) |
 |:---|:---:|---:|---:|---:|---:|---:|
-| **BTCUSDT** | 🔴 SHORT | $127.97 | $62,822.89 | $61,836.01 | $64,610.81 | **`+1.57%`** |
-| **ETHUSDT** | 🔴 SHORT | $124.75 | $1,779.62 | $1,750.41 | $1,828.11 | **`+1.64%`** |
-| **SOLUSDT** | 🔴 SHORT | $113.59 | $73.86 | $71.98 | $76.70 | **`+2.55%`** |
+| **BTCUSDT** | 🔴 SHORT | $127.97 | $62,822.89 | $61,828.01 | $64,590.97 | **`+1.58%`** |
+| **ETHUSDT** | 🔴 SHORT | $124.75 | $1,779.62 | $1,749.38 | $1,827.32 | **`+1.70%`** |
+| **SOLUSDT** | 🔴 SHORT | $113.59 | $73.86 | $71.76 | $76.59 | **`+2.84%`** |
 
 ## 🏆 Historico Recente de Operacoes Fechadas
 
