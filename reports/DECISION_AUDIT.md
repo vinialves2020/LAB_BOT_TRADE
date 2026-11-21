@@ -3,9 +3,19 @@
 Este documento registra o histórico contínuo das decisões tomadas pelo algoritmo **V6.0 Institutional Regime-Weighted CTA** na Binance.
 Opera comprado (`LONG 1x`) e vendido (`SHORT 1x`) guiado por Momentum Multi-Dias (`EMA 48h/168h/720h`), dimensionamento inverso à volatilidade (`30% Vol Target`), Chandelier ATR Stop (`5.5x`) e ajuste de convicção via Ensemble 5x XGBoost.
 
-**Última Atualização**: `2026-11-21 14:00:46 UTC` | **Ledger**: `paper_1000`
+**Última Atualização**: `2026-11-21 14:15:43 UTC` | **Ledger**: `paper_1000`
 
 <!-- AUDIT_START -->
+### 🕒 Ciclo `2026-11-21 14:15:43 UTC` | Patrimônio: **$975.16 USDT** (Caixa: `$856.37`)
+
+| Ativo | Preço | Sinal | Spread EMA48/168 | Regime Macro | Vol Anual | ML 12h | Racional Quantitativo |
+|:---|---:|:---:|---:|:---:|---:|---:|:---|
+| **BTCUSDT** | $60,295.62 | ⚪ **CASH** | **-5.43%** | `MACRO_BEAR` | `78%` | `+39.8 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
+| **ETHUSDT** | $1,691.84 | ⚪ **CASH** | **-5.71%** | `MACRO_BEAR` | `94%` | `-1.4 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
+| **SOLUSDT** | $70.48 | 🟠 **HOLD SHORT** | **-4.24%** | `MACRO_BEAR` | `98%` | `+100.1 bps` | Posição SHORT ativa há 42.8h (PnL: +4.58% · Stop ATR: $71.12 · MACRO_BEAR) |
+
+---
+
 ### 🕒 Ciclo `2026-11-21 14:00:46 UTC` | Patrimônio: **$974.68 USDT** (Caixa: `$856.37`)
 
 | Ativo | Preço | Sinal | Spread EMA48/168 | Regime Macro | Vol Anual | ML 12h | Racional Quantitativo |
@@ -353,13 +363,3 @@ Opera comprado (`LONG 1x`) e vendido (`SHORT 1x`) guiado por Momentum Multi-Dias
 | **BTCUSDT** | $56,163.10 | 🟠 **HOLD SHORT** | **-5.30%** | `MACRO_BEAR` | `69%` | `+203.1 bps` | Posição SHORT ativa há 34.1h (PnL: +10.60% · Stop ATR: $59,428.17 · MACRO_BEAR) |
 | **ETHUSDT** | $1,569.16 | 🟠 **HOLD SHORT** | **-5.82%** | `MACRO_BEAR` | `86%` | `+148.0 bps` | Posição SHORT ativa há 34.1h (PnL: +11.83% · Stop ATR: $1,671.54 · MACRO_BEAR) |
 | **SOLUSDT** | $65.87 | 🟠 **HOLD SHORT** | **-4.08%** | `MACRO_BEAR` | `91%` | `+173.3 bps` | Posição SHORT ativa há 34.1h (PnL: +10.82% · Stop ATR: $70.66 · MACRO_BEAR) |
-
----
-
-### 🕒 Ciclo `2026-11-21 05:15:40 UTC` | Patrimônio: **$999.90 USDT** (Caixa: `$593.76`)
-
-| Ativo | Preço | Sinal | Spread EMA48/168 | Regime Macro | Vol Anual | ML 12h | Racional Quantitativo |
-|:---|---:|:---:|---:|:---:|---:|---:|:---|
-| **BTCUSDT** | $56,366.27 | 🟠 **HOLD SHORT** | **-5.29%** | `MACRO_BEAR` | `69%` | `+203.1 bps` | Posição SHORT ativa há 33.8h (PnL: +10.28% · Stop ATR: $59,421.79 · MACRO_BEAR) |
-| **ETHUSDT** | $1,567.59 | 🟠 **HOLD SHORT** | **-5.82%** | `MACRO_BEAR` | `86%` | `+148.0 bps` | Posição SHORT ativa há 33.8h (PnL: +11.91% · Stop ATR: $1,670.99 · MACRO_BEAR) |
-| **SOLUSDT** | $66.18 | 🟠 **HOLD SHORT** | **-4.07%** | `MACRO_BEAR` | `91%` | `+173.3 bps` | Posição SHORT ativa há 33.8h (PnL: +10.40% · Stop ATR: $70.65 · MACRO_BEAR) |
