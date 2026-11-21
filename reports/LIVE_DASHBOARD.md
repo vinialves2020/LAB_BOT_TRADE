@@ -1,5 +1,5 @@
 # 🤖 BOTTRADE V6.0 - Painel Oficial de Paper Trading (Institutional CTA Long/Short 1x)
-**Ultima Atualizacao**: `2026-11-21 19:01:01 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+**Ultima Atualizacao**: `2026-11-21 19:15:40 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
 ## 💰 Resumo da Carteira (1x Sem Alavancagem)
 - **Patrimonio Liquido Total**: **$974.79 USDT** (`-2.52%`)
@@ -11,15 +11,15 @@
 
 | Ativo | Preco Atual | Sinal | Spread EMA48/168 | Regime Macro (30d) | Vol Anual | ML 12h | Status / Diagnostico |
 |:---|---:|:---:|---:|:---:|---:|---:|:---|
-| **BTCUSDT** | $60,115.89 | ⚪ **CASH** | **-5.12%** | `MACRO_BEAR` | `78%` | `-32.5 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
-| **ETHUSDT** | $1,681.47 | ⚪ **CASH** | **-5.40%** | `MACRO_BEAR` | `93%` | `-58.8 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
-| **SOLUSDT** | $70.72 | 🟠 **HOLD SHORT** | **-3.90%** | `MACRO_BEAR` | `97%` | `+42.7 bps` | Posição SHORT ativa há 47.6h (PnL: +4.25% · Stop ATR: $70.87 · MACRO_BEAR) |
+| **BTCUSDT** | $60,291.08 | ⚪ **CASH** | **-5.11%** | `MACRO_BEAR` | `78%` | `-32.5 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
+| **ETHUSDT** | $1,684.75 | ⚪ **CASH** | **-5.40%** | `MACRO_BEAR` | `93%` | `-58.8 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
+| **SOLUSDT** | $70.72 | 🟠 **HOLD SHORT** | **-3.90%** | `MACRO_BEAR` | `97%` | `+42.7 bps` | Posição SHORT ativa há 47.8h (PnL: +4.25% · Stop ATR: $70.89 · MACRO_BEAR) |
 
 ## 📈 Posicoes Abertas (Long & Short 1x)
 
 | Ativo | Lado | Margem (USDT) | Preco Entrada | Preco Atual | Stop ATR (5.5x) | PnL Aberto (%) |
 |:---|:---:|---:|---:|---:|---:|---:|
-| **SOLUSDT** | 🔴 SHORT | $113.59 | $73.86 | $70.72 | $70.87 | **`+4.25%`** |
+| **SOLUSDT** | 🔴 SHORT | $113.59 | $73.86 | $70.72 | $70.89 | **`+4.25%`** |
 
 ## 🏆 Historico Recente de Operacoes Fechadas
 
