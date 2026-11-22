@@ -3,9 +3,19 @@
 Este documento registra o histórico contínuo das decisões tomadas pelo algoritmo **V6.0 Institutional Regime-Weighted CTA** na Binance.
 Opera comprado (`LONG 1x`) e vendido (`SHORT 1x`) guiado por Momentum Multi-Dias (`EMA 48h/168h/720h`), dimensionamento inverso à volatilidade (`30% Vol Target`), Chandelier ATR Stop (`5.5x`) e ajuste de convicção via Ensemble 5x XGBoost.
 
-**Última Atualização**: `2026-11-22 12:15:49 UTC` | **Ledger**: `paper_1000`
+**Última Atualização**: `2026-11-22 12:30:53 UTC` | **Ledger**: `paper_1000`
 
 <!-- AUDIT_START -->
+### 🕒 Ciclo `2026-11-22 12:30:53 UTC` | Patrimônio: **$974.54 USDT** (Caixa: `$974.54`)
+
+| Ativo | Preço | Sinal | Spread EMA48/168 | Regime Macro | Vol Anual | ML 12h | Racional Quantitativo |
+|:---|---:|:---:|---:|:---:|---:|---:|:---|
+| **BTCUSDT** | $60,747.92 | ⚪ **CASH** | **-4.19%** | `MACRO_BEAR` | `72%` | `-16.5 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
+| **ETHUSDT** | $1,706.21 | ⚪ **CASH** | **-4.39%** | `MACRO_BEAR` | `82%` | `-0.6 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
+| **SOLUSDT** | $70.30 | ⚪ **CASH** | **-3.31%** | `MACRO_BEAR` | `84%` | `+15.1 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
+
+---
+
 ### 🕒 Ciclo `2026-11-22 12:15:49 UTC` | Patrimônio: **$974.54 USDT** (Caixa: `$974.54`)
 
 | Ativo | Preço | Sinal | Spread EMA48/168 | Regime Macro | Vol Anual | ML 12h | Racional Quantitativo |
@@ -353,13 +363,3 @@ Opera comprado (`LONG 1x`) e vendido (`SHORT 1x`) guiado por Momentum Multi-Dias
 | **BTCUSDT** | $59,234.57 | ⚪ **CASH** | **-4.68%** | `MACRO_BEAR` | `71%` | `-6.5 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
 | **ETHUSDT** | $1,659.75 | ⚪ **CASH** | **-4.96%** | `MACRO_BEAR` | `82%` | `-22.9 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
 | **SOLUSDT** | $69.37 | 🟠 **HOLD SHORT** | **-3.60%** | `MACRO_BEAR` | `85%` | `+23.0 bps` | Posição SHORT ativa há 56.3h (PnL: +6.08% · Stop ATR: $70.67 · MACRO_BEAR) |
-
----
-
-### 🕒 Ciclo `2026-11-22 03:30:54 UTC` | Patrimônio: **$976.62 USDT** (Caixa: `$856.37`)
-
-| Ativo | Preço | Sinal | Spread EMA48/168 | Regime Macro | Vol Anual | ML 12h | Racional Quantitativo |
-|:---|---:|:---:|---:|:---:|---:|---:|:---|
-| **BTCUSDT** | $59,327.41 | ⚪ **CASH** | **-4.68%** | `MACRO_BEAR` | `71%` | `-6.5 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
-| **ETHUSDT** | $1,662.51 | ⚪ **CASH** | **-4.96%** | `MACRO_BEAR` | `82%` | `-22.9 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
-| **SOLUSDT** | $69.53 | 🟠 **HOLD SHORT** | **-3.59%** | `MACRO_BEAR` | `85%` | `+23.0 bps` | Posição SHORT ativa há 56.1h (PnL: +5.86% · Stop ATR: $70.67 · MACRO_BEAR) |
