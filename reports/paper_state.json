@@ -2,37 +2,35 @@
   "ledger": "paper_1000",
   "engine_version": "V6.0-CTA-LS1x",
   "initial_cash": 1000.0,
-  "cash": 856.3676,
-  "realized_pnl_usdt": -29.9637,
-  "closed_trades_count": 18,
-  "winning_trades_count": 7,
-  "positions": {
-    "SOLUSDT": {
-      "asset": "SOLUSDT",
-      "side": "SHORT",
-      "quantity": 1.537867,
-      "entry_price": 73.86,
-      "peak_price": 73.86,
-      "trough_price": 65.36,
-      "atr_stop_price": 70.7294,
-      "notional_usdt": 113.59,
-      "entry_fee_usdt": 0.0909,
-      "opened_at": "2026-11-19T19:26:13.095264+00:00",
-      "macro_regime": "MACRO_BEAR",
-      "entry_ml_bps": 14.31,
-      "entry_reason": "Entrada CTA SHORT 1x [A Favor do Macro] | Spread EMA48/168: -2.01% | Peso: 11.8% | Stop ATR: $78.51"
-    }
-  },
+  "cash": 974.5382,
+  "realized_pnl_usdt": -25.474,
+  "closed_trades_count": 19,
+  "winning_trades_count": 8,
+  "positions": {},
   "stopped_sides": {
     "BTCUSDT": "SHORT",
-    "ETHUSDT": "SHORT"
+    "ETHUSDT": "SHORT",
+    "SOLUSDT": "SHORT"
   },
   "last_exit_times": {
     "ETHUSDT": "2026-11-21T13:45:41.338120+00:00",
-    "SOLUSDT": "2026-11-02T07:47:20.484702+00:00",
+    "SOLUSDT": "2026-11-22T11:15:44.862050+00:00",
     "BTCUSDT": "2026-11-21T13:45:41.338120+00:00"
   },
   "trade_history": [
+    {
+      "asset": "SOLUSDT",
+      "side": "SHORT",
+      "opened_at": "2026-11-19T19:26:13.095264+00:00",
+      "closed_at": "2026-11-22 11:15:44 UTC",
+      "entry_price": 73.86,
+      "exit_price": 70.82,
+      "quantity": 1.537867,
+      "gross_pnl_pct": 4.12,
+      "net_pnl_pct": 3.95,
+      "net_pnl_usdt": 4.49,
+      "exit_reason": "Chandelier ATR(5.5x) SHORT acionado (stop $70.74 · melhor +11.51% · realizou +4.12%)"
+    },
     {
       "asset": "ETHUSDT",
       "side": "SHORT",
