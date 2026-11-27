@@ -1,5 +1,5 @@
 # 🤖 BOTTRADE V6.0 - Painel Oficial de Paper Trading (Institutional CTA Long/Short 1x)
-**Ultima Atualizacao**: `2026-11-27 06:15:48 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
+**Ultima Atualizacao**: `2026-11-27 06:30:48 UTC` | **Ledger**: `paper_1000` | **Status**: 🟢 **ONLINE**
 
 ## 💰 Resumo da Carteira (1x Sem Alavancagem)
 - **Patrimonio Liquido Total**: **$974.54 USDT** (`-2.55%`)
@@ -11,9 +11,9 @@
 
 | Ativo | Preco Atual | Sinal | Spread EMA48/168 | Regime Macro (30d) | Vol Anual | ML 12h | Status / Diagnostico |
 |:---|---:|:---:|---:|:---:|---:|---:|:---|
-| **BTCUSDT** | $61,880.59 | ⚪ **CASH** | **-0.72%** | `MACRO_BEAR` | `77%` | `+7.2 bps` | Tendência neutra (-0.72% dentro do buffer ±0.80%) |
-| **ETHUSDT** | $1,739.71 | ⚪ **CASH** | **-0.82%** | `MACRO_BEAR` | `86%` | `-42.3 bps` | Tendência neutra (-0.82% dentro do buffer ±0.80%) |
-| **SOLUSDT** | $73.21 | ⚪ **CASH** | **-0.25%** | `MACRO_BEAR` | `89%` | `-29.6 bps` | Tendência neutra (-0.25% dentro do buffer ±0.80%) |
+| **BTCUSDT** | $61,720.21 | ⚪ **CASH** | **-0.73%** | `MACRO_BEAR` | `77%` | `+7.2 bps` | Tendência neutra (-0.73% dentro do buffer ±0.80%) |
+| **ETHUSDT** | $1,735.45 | ⚪ **CASH** | **-0.83%** | `MACRO_BEAR` | `86%` | `-42.3 bps` | Tendência neutra (-0.83% dentro do buffer ±0.80%) |
+| **SOLUSDT** | $73.01 | ⚪ **CASH** | **-0.26%** | `MACRO_BEAR` | `89%` | `-29.6 bps` | Tendência neutra (-0.26% dentro do buffer ±0.80%) |
 
 ## 📈 Posicoes Abertas (Long & Short 1x)
 
