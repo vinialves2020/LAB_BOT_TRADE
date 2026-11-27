@@ -9,8 +9,7 @@
   "positions": {},
   "stopped_sides": {
     "BTCUSDT": "SHORT",
-    "ETHUSDT": "SHORT",
-    "SOLUSDT": "SHORT"
+    "ETHUSDT": "SHORT"
   },
   "last_exit_times": {
     "ETHUSDT": "2026-11-21T13:45:41.338120+00:00",
