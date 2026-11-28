@@ -3,9 +3,19 @@
 Este documento registra o histórico contínuo das decisões tomadas pelo algoritmo **V6.0 Institutional Regime-Weighted CTA** na Binance.
 Opera comprado (`LONG 1x`) e vendido (`SHORT 1x`) guiado por Momentum Multi-Dias (`EMA 48h/168h/720h`), dimensionamento inverso à volatilidade (`30% Vol Target`), Chandelier ATR Stop (`5.5x`) e ajuste de convicção via Ensemble 5x XGBoost.
 
-**Última Atualização**: `2026-11-28 05:45:48 UTC` | **Ledger**: `paper_1000`
+**Última Atualização**: `2026-11-28 06:01:01 UTC` | **Ledger**: `paper_1000`
 
 <!-- AUDIT_START -->
+### 🕒 Ciclo `2026-11-28 06:01:01 UTC` | Patrimônio: **$974.54 USDT** (Caixa: `$974.54`)
+
+| Ativo | Preço | Sinal | Spread EMA48/168 | Regime Macro | Vol Anual | ML 12h | Racional Quantitativo |
+|:---|---:|:---:|---:|:---:|---:|---:|:---|
+| **BTCUSDT** | $59,773.51 | ⚪ **CASH** | **-0.83%** | `MACRO_BEAR` | `66%` | `+23.9 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
+| **ETHUSDT** | $1,656.72 | ⚪ **CASH** | **-1.20%** | `MACRO_BEAR` | `70%` | `+0.6 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
+| **SOLUSDT** | $71.25 | ⚪ **CASH** | **+0.30%** | `MACRO_BEAR` | `75%` | `+12.7 bps` | Tendência neutra (+0.30% dentro do buffer ±0.80%) |
+
+---
+
 ### 🕒 Ciclo `2026-11-28 05:45:48 UTC` | Patrimônio: **$974.54 USDT** (Caixa: `$974.54`)
 
 | Ativo | Preço | Sinal | Spread EMA48/168 | Regime Macro | Vol Anual | ML 12h | Racional Quantitativo |
@@ -353,13 +363,3 @@ Opera comprado (`LONG 1x`) e vendido (`SHORT 1x`) guiado por Momentum Multi-Dias
 | **BTCUSDT** | $59,855.65 | ⚪ **CASH** | **-0.67%** | `MACRO_BEAR` | `76%` | `+46.4 bps` | Tendência neutra (-0.67% dentro do buffer ±0.80%) |
 | **ETHUSDT** | $1,667.36 | ⚪ **CASH** | **-0.86%** | `MACRO_BEAR` | `82%` | `+31.7 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
 | **SOLUSDT** | $71.95 | ⚪ **CASH** | **+0.37%** | `MACRO_BEAR` | `85%` | `+32.1 bps` | Tendência neutra (+0.37% dentro do buffer ±0.80%) |
-
----
-
-### 🕒 Ciclo `2026-11-27 21:00:54 UTC` | Patrimônio: **$974.54 USDT** (Caixa: `$974.54`)
-
-| Ativo | Preço | Sinal | Spread EMA48/168 | Regime Macro | Vol Anual | ML 12h | Racional Quantitativo |
-|:---|---:|:---:|---:|:---:|---:|---:|:---|
-| **BTCUSDT** | $59,864.01 | ⚪ **CASH** | **-0.67%** | `MACRO_BEAR` | `76%` | `+46.4 bps` | Tendência neutra (-0.67% dentro do buffer ±0.80%) |
-| **ETHUSDT** | $1,669.09 | ⚪ **CASH** | **-0.86%** | `MACRO_BEAR` | `82%` | `+31.7 bps` | Bloqueio anti-whipsaw pós-Stop (SHORT); aguardando reset de tendência |
-| **SOLUSDT** | $72.08 | ⚪ **CASH** | **+0.37%** | `MACRO_BEAR` | `85%` | `+32.1 bps` | Tendência neutra (+0.37% dentro do buffer ±0.80%) |
